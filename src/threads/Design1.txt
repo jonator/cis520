@@ -5,7 +5,7 @@ CIS 520 - Programming Project #1
 ---- GROUP ----
 
 >> Fill in the names and email addresses of your group members.
-
+Miles McLenon milesmclenon@ksu.edu
 Brandon Fisher bmfisher@ksu.edu
 FirstName LastName <email@k-state.edu>
 ...
