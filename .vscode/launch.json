@@ -5,13 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "launch at current file",
+            "name": "launch in build folder & current file",
             "type": "cppdbg",
             "request": "launch",
             "program": "kernel.o",
             "targetArchitecture": "x86",
             "stopAtEntry": false,
-            "cwd": "${fileDirname}/build",
+            "cwd": "${workspaceFolder}/src/threads/build",
             "launchCompleteCommand": "None",
             "environment": [],
             "externalConsole": false,
@@ -24,7 +24,8 @@
 DEBUGGING
 
 1. run make in change path
-2. cd build && pintos -v --gdb -- run {insert_program_here}
-3. Launch debugger (▶️) while in file you want to debug (you should be able to set breakpoints)
+2. ensure "cwd" above is in correct path
+3. cd build && pintos -v --gdb -- run {insert_program_here}
+4. Launch debugger (▶️) while in file you want to debug (you should be able to set breakpoints)
 
 */
