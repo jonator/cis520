@@ -35,12 +35,19 @@ static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
 
 void
-sleep_sema_init(struct sleep_sema *sleep_sema, int64_t wakeup_tick)
+sleep_sema_init (struct sleep_sema *sleep_sema, int64_t wakeup_tick)
 {
   sleep_sema->wakeup_tick = wakeup_tick;
-  struct semaphore *new_sema = malloc(sizeof(struct semaphore));
+  struct semaphore *new_sema = malloc (sizeof (struct semaphore));
   sema_init (new_sema, 0);
   sleep_sema->sema = new_sema;
+}
+
+void
+sleep_sema_deinit (struct sleep_sema *sleep_sema)
+{
+  free (sleep_sema->sema);
+  free (sleep_sema);
 }
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
@@ -98,6 +105,22 @@ timer_elapsed (int64_t then)
   return timer_ticks () - then;
 }
 
+/*Function to insert sleep_sema in order*/
+void
+insert_sleep_list (struct sleep_sema* ins_sema)
+{
+  int64_t wakeup_tick = ins_sema->wakeup_tick;
+  for (struct list_elem* e = list_begin (&sleep_list); e != list_end (&sleep_list); e = list_next (e))
+  {
+    struct sleep_sema *cur = list_entry (e, struct sleep_sema, elem);
+    if (wakeup_tick < cur->wakeup_tick)
+    {
+      list_insert (e, &ins_sema->elem);
+      break;
+    }
+  }
+}
+
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void
@@ -106,13 +129,11 @@ timer_sleep (int64_t ticks)
   int64_t current_tick = timer_ticks ();
   int64_t wakeup_tick = ticks + current_tick;
 
-  struct sleep_sema *new_sleep_sema = malloc(sizeof(struct sleep_sema));
+  struct sleep_sema *new_sleep_sema = malloc (sizeof (struct sleep_sema));
   sleep_sema_init (new_sleep_sema, wakeup_tick);
-  
-
-  ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (current_tick) < ticks) 
-    thread_yield ();
+  insert_sleep_list (new_sleep_sema);
+  sema_down (new_sleep_sema->sema);
+  sleep_sema_deinit (new_sleep_sema);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -191,6 +212,17 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+  struct list_elem *first_sleep_elem = list_begin (&sleep_list);
+  while (first_sleep_elem->next != NULL)
+  {
+    struct sleep_sema *first_sleep_sema = list_entry (first_sleep_elem, struct sleep_sema, elem);
+    if (ticks >= first_sleep_sema->wakeup_tick)
+    {
+      sema_up (first_sleep_sema->sema);
+      list_remove (first_sleep_elem);
+    }
+    first_sleep_elem = list_begin (&sleep_list);
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
