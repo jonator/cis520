@@ -110,15 +110,19 @@ void
 insert_sleep_list (struct sleep_sema* ins_sema)
 {
   int64_t wakeup_tick = ins_sema->wakeup_tick;
-  for (struct list_elem* e = list_begin (&sleep_list); e != list_end (&sleep_list); e = list_next (e))
+  if (!list_empty (&sleep_list))
   {
-    struct sleep_sema *cur = list_entry (e, struct sleep_sema, elem);
-    if (wakeup_tick < cur->wakeup_tick)
+    for (struct list_elem* e = list_begin (&sleep_list); e != list_end (&sleep_list); e = list_next (e))
     {
-      list_insert (e, &ins_sema->elem);
-      break;
+      struct sleep_sema *cur = list_entry (e, struct sleep_sema, elem);
+      if (wakeup_tick < cur->wakeup_tick)
+      {
+        list_insert (e, &ins_sema->elem);
+        return;
+      }
     }
   }
+  list_insert (list_end (&sleep_list), &ins_sema->elem);
 }
 
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
@@ -212,16 +216,21 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
-  struct list_elem *first_sleep_elem = list_begin (&sleep_list);
-  while (first_sleep_elem->next != NULL)
+  
+  while (!list_empty (&sleep_list))
   {
+    struct list_elem *first_sleep_elem = list_begin (&sleep_list);
     struct sleep_sema *first_sleep_sema = list_entry (first_sleep_elem, struct sleep_sema, elem);
     if (ticks >= first_sleep_sema->wakeup_tick)
     {
       sema_up (first_sleep_sema->sema);
       list_remove (first_sleep_elem);
     }
-    first_sleep_elem = list_begin (&sleep_list);
+    else
+    {
+      break;
+    }
+    
   }
 }
 

@@ -15,7 +15,9 @@ struct sleep_sema {
     struct list_elem elem;
 };
 
-void sleep_sema_init(struct sleep_sema*, int64_t);
+void sleep_sema_init (struct sleep_sema*, int64_t);
+void sleep_sema_deinit (struct sleep_sema*);
+void insert_sleep_list (struct sleep_sema*);
 
 void timer_init (void);
 void timer_calibrate (void);
