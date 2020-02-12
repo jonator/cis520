@@ -105,7 +105,7 @@ timer_elapsed (int64_t then)
   return timer_ticks () - then;
 }
 
-/*Function to insert sleep_sema in order*/
+/*Function to insert sleep_sema in order in the sleep_list*/
 void
 insert_sleep_list (struct sleep_sema* ins_sema)
 {
@@ -132,10 +132,14 @@ timer_sleep (int64_t ticks)
 {
   int64_t current_tick = timer_ticks ();
   int64_t wakeup_tick = ticks + current_tick;
-
+  /*Create sleep_sema struct to track when the thread should
+    wake up and insert the semaphore into a sorted doubly
+    linked list to track all sleeping threads.*/
   struct sleep_sema *new_sleep_sema = malloc (sizeof (struct sleep_sema));
   sleep_sema_init (new_sleep_sema, wakeup_tick);
   insert_sleep_list (new_sleep_sema);
+  /*Block thread with the semaphore, free memory when thread
+    is awakened*/
   sema_down (new_sleep_sema->sema);
   sleep_sema_deinit (new_sleep_sema);
 }
@@ -217,6 +221,9 @@ timer_interrupt (struct intr_frame *args UNUSED)
   ticks++;
   thread_tick ();
   
+  /*  Loop that checks SLEEP_LIST for any threads that 
+      should wake up.  Checks sorted list, if first thread
+      needs wakes up, continues to check next thread etc.*/
   while (!list_empty (&sleep_list))
   {
     struct list_elem *first_sleep_elem = list_begin (&sleep_list);
@@ -230,7 +237,6 @@ timer_interrupt (struct intr_frame *args UNUSED)
     {
       break;
     }
-    
   }
 }
 
