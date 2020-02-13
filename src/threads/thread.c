@@ -70,6 +70,7 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+static bool thread_init_has_run = false;
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -98,6 +99,7 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  thread_init_has_run = true;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -239,6 +241,10 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
+  if (thread_init_has_run && t->priority > thread_current()->priority)
+  {
+    thread_yield();
+  }
   intr_set_level (old_level);
 }
 
@@ -336,6 +342,14 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  // for (struct list_elem *e = list_begin (&ready_list); e != list_end (&ready_list); e = list_next (e))
+  // {
+  //   struct thread *ready_thread = list_entry (e, struct thread, elem);
+  //   if (ready_thread->priority > new_priority){
+  //     thread_yield();
+  //     break;
+  //   }
+  // }
 }
 
 /* Returns the current thread's priority. */
@@ -493,7 +507,21 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  {
+    struct list_elem *next_elem = list_begin (&ready_list);
+    struct thread *next_thread = list_entry (next_elem, struct thread, elem);
+    for (struct list_elem* e = list_begin (&ready_list); e != list_end (&ready_list); e = list_next (e))
+    {
+      struct thread *ready_thread = list_entry (e, struct thread, elem);
+      if (ready_thread->priority > next_thread->priority) 
+      {
+        next_elem = e;
+        next_thread = ready_thread;
+      }
+    }
+    list_remove(next_elem);
+    return next_thread;
+  }
 }
 
 /* Completes a thread switch by activating the new thread's page
