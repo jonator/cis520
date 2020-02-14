@@ -27,6 +27,7 @@ static unsigned loops_per_tick;
 
 /* stores list of sleep semaphores */
 static struct list sleep_list;
+static struct semaphore sleep_list_sema;
 
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
@@ -40,6 +41,7 @@ void
 timer_init (void) 
 {
   list_init (&sleep_list);
+  sema_init (&sleep_list_sema, 1);
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
 }
@@ -115,14 +117,15 @@ insert_sleep_list (int64_t wakeup_tick)
 void
 timer_sleep (int64_t ticks) 
 {
-  enum intr_level old_level;
-  old_level = intr_disable();
+  sema_down (&sleep_list_sema);
 
   int64_t current_tick = timer_ticks ();
   int64_t wakeup_tick = ticks + current_tick;
   
   insert_sleep_list (wakeup_tick);
-
+  sema_up (&sleep_list_sema);
+  
+  enum intr_level old_level = intr_disable();
   thread_block();
   intr_set_level(old_level);
 }
