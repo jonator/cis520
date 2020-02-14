@@ -34,22 +34,6 @@ static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
 
-void
-sleep_sema_init (struct sleep_sema *sleep_sema, int64_t wakeup_tick)
-{
-  sleep_sema->wakeup_tick = wakeup_tick;
-  struct semaphore *new_sema = malloc (sizeof (struct semaphore));
-  sema_init (new_sema, 0);
-  sleep_sema->sema = new_sema;
-}
-
-void
-sleep_sema_deinit (struct sleep_sema *sleep_sema)
-{
-  free (sleep_sema->sema);
-  free (sleep_sema);
-}
-
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
@@ -105,24 +89,25 @@ timer_elapsed (int64_t then)
   return timer_ticks () - then;
 }
 
-/*Function to insert sleep_sema in order in the sleep_list*/
+/*Function to insert current thread in order in the sleep_list*/
 void
-insert_sleep_list (struct sleep_sema* ins_sema)
+insert_sleep_list (int64_t wakeup_tick)
 {
-  int64_t wakeup_tick = ins_sema->wakeup_tick;
+  struct thread *sleep_thread = thread_current();
+  sleep_thread->wakeup_tick = wakeup_tick;
   if (!list_empty (&sleep_list))
   {
     for (struct list_elem* e = list_begin (&sleep_list); e != list_end (&sleep_list); e = list_next (e))
     {
-      struct sleep_sema *cur = list_entry (e, struct sleep_sema, elem);
+      struct thread *cur = list_entry (e, struct thread, sleep_elem);
       if (wakeup_tick < cur->wakeup_tick)
       {
-        list_insert (e, &ins_sema->elem);
+        list_insert (e, &sleep_thread->sleep_elem);
         return;
       }
     }
   }
-  list_insert (list_end (&sleep_list), &ins_sema->elem);
+  list_insert (list_end (&sleep_list), &sleep_thread->sleep_elem);
 }
 
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
@@ -130,18 +115,16 @@ insert_sleep_list (struct sleep_sema* ins_sema)
 void
 timer_sleep (int64_t ticks) 
 {
+  enum intr_level old_level;
+  old_level = intr_disable();
+
   int64_t current_tick = timer_ticks ();
   int64_t wakeup_tick = ticks + current_tick;
-  /*Create sleep_sema struct to track when the thread should
-    wake up and insert the semaphore into a sorted doubly
-    linked list to track all sleeping threads.*/
-  struct sleep_sema *new_sleep_sema = malloc (sizeof (struct sleep_sema));
-  sleep_sema_init (new_sleep_sema, wakeup_tick);
-  insert_sleep_list (new_sleep_sema);
-  /*Block thread with the semaphore, free memory when thread
-    is awakened*/
-  sema_down (new_sleep_sema->sema);
-  sleep_sema_deinit (new_sleep_sema);
+  
+  insert_sleep_list (wakeup_tick);
+
+  thread_block();
+  intr_set_level(old_level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -221,17 +204,19 @@ timer_interrupt (struct intr_frame *args UNUSED)
   ticks++;
   thread_tick ();
   
-  /*  Loop that checks SLEEP_LIST for any threads that 
+  /*  Checks SLEEP_LIST for any threads that 
       should wake up.  Checks sorted list, if first thread
       needs wakes up, continues to check next thread etc.*/
   while (!list_empty (&sleep_list))
   {
     struct list_elem *first_sleep_elem = list_begin (&sleep_list);
-    struct sleep_sema *first_sleep_sema = list_entry (first_sleep_elem, struct sleep_sema, elem);
-    if (ticks >= first_sleep_sema->wakeup_tick)
+    struct thread *first_sleep_thread = list_entry (first_sleep_elem, struct thread, sleep_elem);
+    if (ticks >= first_sleep_thread->wakeup_tick)
     {
-      sema_up (first_sleep_sema->sema);
+      enum intr_level old_level = intr_disable();
       list_remove (first_sleep_elem);
+      thread_unblock(first_sleep_thread);
+      intr_set_level (old_level);
     }
     else
     {
