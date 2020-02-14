@@ -70,7 +70,6 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
-static bool thread_init_has_run = false;
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -99,7 +98,6 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
-  thread_init_has_run = true;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -241,7 +239,7 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
-  if (thread_init_has_run && t->priority > thread_current()->priority)
+  if (list_size(&all_list) > 2 && t->priority > thread_current()->priority)
   {
     thread_yield();
   }
@@ -342,14 +340,10 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
-  // for (struct list_elem *e = list_begin (&ready_list); e != list_end (&ready_list); e = list_next (e))
-  // {
-  //   struct thread *ready_thread = list_entry (e, struct thread, elem);
-  //   if (ready_thread->priority > new_priority){
-  //     thread_yield();
-  //     break;
-  //   }
-  // }
+  if (next_thread_to_run ()->priority > new_priority)
+  {
+    thread_yield();
+  }
 }
 
 /* Returns the current thread's priority. */
@@ -519,7 +513,6 @@ next_thread_to_run (void)
         next_thread = ready_thread;
       }
     }
-    list_remove(next_elem);
     return next_thread;
   }
 }
@@ -588,6 +581,7 @@ schedule (void)
   ASSERT (cur->status != THREAD_RUNNING);
   ASSERT (is_thread (next));
 
+  list_remove(&next->elem);
   if (cur != next)
     prev = switch_threads (cur, next);
   thread_schedule_tail (prev);
