@@ -239,7 +239,7 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
-  if (t->priority > thread_current ()->priority)
+  if (thread_ptr_get_priority (t) > thread_get_priority ())
   {
     if (intr_context ())
     {
@@ -347,7 +347,7 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
-  if (next_thread_to_run ()->priority > new_priority)
+  if (thread_ptr_get_priority (next_thread_to_run ()) > thread_get_priority ())
   {
     thread_yield();
   }
@@ -355,13 +355,12 @@ thread_set_priority (int new_priority)
 
 /* Returns the current thread's priority. */
 int
-thread_get_priority (void) 
+thread_ptr_get_priority (struct thread *t) 
 {
-  struct thread *cur = thread_current ();
-  int max = cur->priority;
-  if (!list_empty (&cur->owned_locks))
+  int max = t->priority;
+  if (!list_empty (&t->owned_locks))
   {
-    for (struct list_elem *e = list_begin (&cur->owned_locks); e != list_end (&cur->owned_locks); e = list_next (e))
+    for (struct list_elem *e = list_begin (&t->owned_locks); e != list_end (&t->owned_locks); e = list_next (e))
     {
       struct lock *lock = list_entry (e, struct lock, elem);
       if (lock->promoted_priority > max)
@@ -372,6 +371,13 @@ thread_get_priority (void)
   }
   return max;
 }
+
+/* Returns the current thread's priority. */
+int
+thread_get_priority (void)
+{
+  return thread_ptr_get_priority (thread_current ());
+} 
 
 /* Sets the current thread's nice value to NICE. */
 void
@@ -529,7 +535,7 @@ next_thread_to_run (void)
     for (struct list_elem* e = list_begin (&ready_list); e != list_end (&ready_list); e = list_next (e))
     {
       struct thread *ready_thread = list_entry (e, struct thread, elem);
-      if (ready_thread->priority > next_thread->priority) 
+      if (thread_ptr_get_priority (ready_thread) > thread_ptr_get_priority(next_thread)) 
       {
         next_elem = e;
         next_thread = ready_thread;
