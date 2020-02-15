@@ -25,7 +25,7 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
-/* stores list of sleep semaphores */
+/* stores list of sleeping threads */
 static struct list sleep_list;
 static struct semaphore sleep_list_sema;
 
@@ -117,16 +117,16 @@ insert_sleep_list (int64_t wakeup_tick)
 void
 timer_sleep (int64_t ticks) 
 {
-  sema_down (&sleep_list_sema);
+  sema_down (&sleep_list_sema); // get permission on sleep_list_sema
 
-  int64_t current_tick = timer_ticks ();
-  int64_t wakeup_tick = ticks + current_tick;
+  int64_t current_tick = timer_ticks (); 
+  int64_t wakeup_tick = ticks + current_tick; // calculate wakeup tick
   
-  insert_sleep_list (wakeup_tick);
-  sema_up (&sleep_list_sema);
+  insert_sleep_list (wakeup_tick); // insert thread into sleeplist with wakup_tick
+  sema_up (&sleep_list_sema); // release permission on sleep_list_se
   
-  enum intr_level old_level = intr_disable();
-  thread_block();
+  enum intr_level old_level = intr_disable(); 
+  thread_block(); // block thread until time has elapsed
   intr_set_level(old_level);
 }
 

@@ -4,12 +4,9 @@ CIS 520 - Programming Project #1
                    
 ---- GROUP ----
 
->> Fill in the names and email addresses of your group members.
 Jon Ator jator@ksu.edu
 Miles McLenon milesmclenon@ksu.edu
 Brandon Fisher bmfisher@ksu.edu
-FirstName LastName <email@k-state.edu>
-...
 
 ---- PRELIMINARIES ----
 
@@ -26,6 +23,26 @@ FirstName LastName <email@k-state.edu>
 
 ---- DATA STRUCTURES ----
 
+A1:
+    In timer.c:
+
+    /* stores list of sleeping threads */
+    static struct list sleep_list;
+
+    /* semaphore to protect access to sleep_list */
+    static struct semaphore sleep_list_sema;
+
+    -----
+    In thread.h:
+
+    struct thread
+        ...
+        int64_t wakeup_tick;       /* Tick value the thread should be woken up on */
+        ...
+    };
+
+
+
 >> A1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
@@ -36,18 +53,41 @@ FirstName LastName <email@k-state.edu>
 >> A2: Briefly describe what happens in a call to your timer_sleep(),
 >> including the effects of the timer interrupt handler.
 
+A2:
+    In timer_sleep(), we sema_down(&sleep_list_sema) to protect our 
+    sleep_list.  We then use an auxillary function to insert the thread
+    into sleep_list in non-decreasing order based on the tick when the 
+    thread should wake up.  Next sema_up(&sleep_list_sema), disable 
+    interrupts and call thread_block() to put the current thread to sleep.
+
 >> A3: What steps are taken to minimize the amount of time spent in
 >> the timer interrupt handler?
 
+A3:
+    In timer_interrupt(), we wake threads from a list that has been
+    pre-sorted. This ensures that the maximum number of threads checked
+    for the need to wakeup is only 1 greater than the number of threads
+    ready to wake at current tick. i.e. if no threads are ready, only 1
+    thread will be checked.
 
 ---- SYNCHRONIZATION ----
 
 >> A4: How are race conditions avoided when multiple threads call
 >> timer_sleep() simultaneously?
 
+A4:
+    In timer_sleep() sleep_list can only be modified by one thread at a time due 
+    to the protection from sleep_list_sema.  If multiple threads call timer_sleep()
+    simultaneously, one will be blocked on the sema_down instruction until the 
+    other has inserted itself into the sleep_list.  Interrupts are only disabled
+    for the call to thread_block().
+
 
 >> A5: How are race conditions avoided when a timer interrupt occurs
 >> during a call to timer_sleep()?
+
+A5:
+    
 
 
 ---- RATIONALE ----
@@ -68,6 +108,14 @@ FirstName LastName <email@k-state.edu>
 
 >> B2: Explain the data structure used to track priority donation.
 
+In synch.h
+
+struct lock 
+  {
+    ...
+    struct list_elem elem;      /* List_elem used by thread to keep list of all owned locks*/
+    int promoted_priority;      /* Stores highest donated priority from waiting thread */
+  };
 
 ---- ALGORITHMS ----
 

@@ -88,9 +88,9 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int64_t wakeup_tick;                /* Wakeup_tick for sleeping*/
-    struct lock *waiting_on;
-    struct list owned_locks;
+    int64_t wakeup_tick;                /* Tick value the thread should be woken up on */
+    struct lock *waiting_on;            /* Reference to lock thread is waiting on */
+    struct list owned_locks;            /* List of locks thread has acquired */
     struct list_elem sleep_elem;        /* List element for sleep_list in timer.c*/
     struct list_elem allelem;           /* List element for all threads list. */
 
