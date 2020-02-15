@@ -205,6 +205,9 @@ lock_init (struct lock *lock)
   sema_init (&lock->semaphore, 1);
 }
 
+/* Promotes the priority associated with a lock. Any
+   holder that is waiting on the lock is recursively promoted.
+*/
 void
 promote_lock (struct lock *lock, int priority)
 {

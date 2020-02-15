@@ -7,8 +7,6 @@
 /* Number of timer interrupts per second. */
 #define TIMER_FREQ 100
 
-void insert_sleep_list (int64_t);
-
 void timer_init (void);
 void timer_calibrate (void);
 
