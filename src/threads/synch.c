@@ -50,6 +50,28 @@ sema_init (struct semaphore *sema, unsigned value)
   list_init (&sema->waiters);
 }
 
+/*Returns the highest priority leftmost thread* in the list.
+  thread_list must not be empty.  Interrupts must be disabled
+  Removes the the thread* from the list.*/
+struct thread *
+highest_priority_leftmost_thread_remove (struct list *thread_list)
+{
+  struct thread *max_priority_thread = list_entry (list_begin (thread_list), struct thread, elem);
+  int max_priority = thread_ptr_get_priority (max_priority_thread);
+  for (struct list_elem* e = list_begin (thread_list); e != list_end (thread_list); e = list_next (e))
+  {
+    struct thread *cur = list_entry (e, struct thread, elem);
+    int cur_priority = thread_ptr_get_priority (cur);
+    if (cur_priority > max_priority)
+    {
+      max_priority = cur_priority;
+      max_priority_thread = cur;
+    }
+  }
+  list_remove(&max_priority_thread->elem);
+  return max_priority_thread;
+}
+
 /* Down or "P" operation on a semaphore.  Waits for SEMA's value
    to become positive and then atomically decrements it.
 
@@ -113,10 +135,10 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) 
-    thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
   sema->value++;
+  if (!list_empty (&sema->waiters)) 
+    thread_unblock (highest_priority_leftmost_thread_remove (&sema->waiters));
+  
   intr_set_level (old_level);
 }
 
