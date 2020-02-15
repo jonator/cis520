@@ -181,6 +181,19 @@ lock_init (struct lock *lock)
   sema_init (&lock->semaphore, 1);
 }
 
+void
+promote_lock (struct lock *lock, int priority)
+{
+  if (priority > lock->promoted_priority)
+  {
+    lock->promoted_priority = priority;
+    if (lock->holder->waiting_on != NULL)
+    {
+      promote_lock (lock->holder->waiting_on, priority);
+    }
+  }
+}
+
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
    thread.
@@ -196,8 +209,19 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  enum intr_level old_level = intr_disable ();
+  struct thread *cur = thread_current ();
+  cur->waiting_on = lock;
+  if (lock->semaphore.value == 0)
+  {
+    promote_lock (lock, thread_get_priority ());
+  }
   sema_down (&lock->semaphore);
-  lock->holder = thread_current ();
+  cur->waiting_on = NULL;
+  list_push_back (&cur->owned_locks, &lock->elem);
+  lock->holder = cur;
+  lock->promoted_priority = PRI_MIN;
+  intr_set_level (old_level);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -230,7 +254,7 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
-
+  list_remove (&lock->elem);
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
