@@ -1,22 +1,11 @@
 
 CIS 520 - Programming Project #1
-
                    
 ---- GROUP ----
 
-Jon Ator jator@ksu.edu
-Miles McLenon milesmclenon@ksu.edu
-Brandon Fisher bmfisher@ksu.edu
-
----- PRELIMINARIES ----
-
->> If you have any preliminary comments on your submission, notes for
->> the TA, or extra credit, please give them here.
-
->> Please cite any offline or online sources you consulted while
->> preparing your submission, other than the Pintos documentation,
->> course text, lecture notes, and course staff.
-
+Brandon Michael Fisher   bmfisher@ksu.edu
+Jonathan Gregory Ator    jator@ksu.edu
+Miles Lawrence McLenon   milesmclenon@ksu.edu
 
                  ALARM CLOCK
                  ===========
@@ -42,7 +31,6 @@ A1:
         struct list_elem sleep_elem;        /* List element for sleep_list in timer.c*/
         ...
     };
-
 
 ---- ALGORITHMS ----
 
@@ -81,7 +69,6 @@ A5:
     timer_interrupt() from checking for threads to be awoken at the 
     instant we are inserting a new thread into sleep_list.
 
-
 ---- RATIONALE ----
 
 A6:
@@ -90,8 +77,8 @@ A6:
     wakeup_tick' to store the sleep duration in ticks, and a
     pointer to a 'struct semaphore;' used as a lock to block the sleeping
     thread and later awaken it once the 'wakeup_tick' duration condition
-    was met. This approach was found to have too much overhead in the case
-    where many threads were requesting to sleep within a short duration
+    was met. This approach had too much overhead when
+    many threads were requesting to sleep within a short duration
     of time. Individually allocating and initializing semaphores for each
     sleeping thread was likely the cause of inefficiency. The superior
     approach involved using a list of sleeping threads, and then only
@@ -109,8 +96,8 @@ B1:
     struct lock
     {
         ...
-        struct list_elem elem;      /* List_elem used by thread to keep list of all owned locks */
-        int promoted_priority;      /* Stores highest donated priority from waiting thread */
+        struct list_elem elem;  /* List_elem used by thread to keep list of all owned locks */
+        int promoted_priority;  /* Stores highest donated priority from waiting thread */
     };
 
     -----
@@ -119,12 +106,11 @@ B1:
     struct thread
     {
         ...
-        struct lock *waiting_on;            /* Reference to lock thread is waiting on */
-        struct list owned_locks;            /* List of locks thread has acquired */
+        struct lock *waiting_on;  /* Reference to lock thread is waiting on */
+        struct list owned_locks;  /* List of locks thread has acquired */
     }
 
->> B2: Explain the data structure used to track priority donation.
-
+B2:
     We tightly coupled priority donation to the resource being 
     requested (a lock).  A thread is able to track all locks that 
     it owns via the owned_locks.  It also tracks the lock that it
@@ -139,88 +125,73 @@ In synch.h
 struct lock 
   {
     ...
-    struct list_elem elem;      /* List_elem used by thread to keep list of all owned locks*/
-    int promoted_priority;      /* Stores highest donated priority from waiting thread */
+    struct list_elem elem;  /* List_elem used by thread to keep list of all owned locks*/
+    int promoted_priority;  /* Stores highest donated priority from waiting thread */
   };
 
 ---- ALGORITHMS ----
 
->> B3: How do you ensure that the highest priority thread waiting for
->> a lock, semaphore, or condition variable wakes up first?
-
 B3:
     When a lock, semaphore, or condition varable is realeased we then 
     wake up the leftmost thread with the highest priority considering 
-    priority donation. 
+    priority donation. The thread_get_priority() function is able to 
+    get that specific threads highest priority donation based on all
+    held locks so that if a threads base priority. By removing the 
+    leftmost element ensures that we give equal attention to threads
+    that share the highest priority.
     
-
->> B4: Describe the sequence of events when a call to lock_acquire()
->> causes a priority donation.  How is nested donation handled?
-
 B4:
     In our implementation of lock_acquire(), we call a promote_lock()
     if the lock is currently in use by another thread (i.e. the semaphore
     value is at 0). If promotion is necessary, the lock's 'promoted_priority'
-    
-    
->> B5: Describe the sequence of events when lock_release() is called
->> on a lock that a higher-priority thread is waiting for.
+    would be set to the max of its current value and the priority of the caller of 
+    lock_acquire(). In the case of nested donation promote_lock() will recursively 
+    promote the priority of any lock holder that the original lock's holder is waiting
+    on. This ensures locks held by threads are transitive, regardless of priority.   
+
+B5:
+    When lock_release() is called, interrupts are disabled and then the lock 
+    is removed from the list of owned_locks of the current thread.  The lock 
+    also clears its holder property.  Next, since locks are built on top of 
+    semaphores, sema_up continues the release process by searching for the highest 
+    priority thread that is waiting for the lock (built on top of the sema).
+    Thread_unblock() is called with that thread, which switches its state to 
+    ready and adds it to the ready list.  Since the this thread is a higher-
+    priority than the thread releasing the lock, thread_unblock() realizes the 
+    current thread should immediately yield, allowing the highest priority
+    thread in the ready_list to begin execution on the cpu.  If that highest-
+    priority thread is the one waiting on the lock that was just released, it 
+    will resume execution inside the sema_down() function and continue back up 
+    the call stack to acquire the lock.
 
 ---- SYNCHRONIZATION ----
 
->> B6: Describe a potential race in thread_set_priority() and explain
->> how your implementation avoids it.  Can you use a lock to avoid
->> this race?
-
-
-
----- RATIONALE ----
-
->> B7: Why did you choose this design?  In what ways is it superior to
->> another design you considered?
-
-
-              ADVANCED SCHEDULER [EXTRA CREDIT]
-              =================================
-
----- DATA STRUCTURES ----
-
->> C1: Copy here the declaration of each new or changed `struct' or
->> `struct' member, global or static variable, `typedef', or
->> enumeration.  Identify the purpose of each in 25 words or less.
-
----- ALGORITHMS ----
-
->> C2: Suppose threads A, B, and C have nice values 0, 1, and 2.  Each
->> has a recent_cpu value of 0.  Fill in the table below showing the
->> scheduling decision and the priority and recent_cpu values for each
->> thread after each given number of timer ticks:
-
-timer  recent_cpu    priority   thread
-ticks   A   B   C   A   B   C   to run
------  --  --  --  --  --  --   ------
- 0
- 4
- 8
-12
-16
-20
-24
-28
-32
-36
-
->> C3: Did any ambiguities in the scheduler specification make values
->> in the table uncertain?  If so, what rule did you use to resolve
->> them?  Does this match the behavior of your scheduler?
-
->> C4: How is the way you divided the cost of scheduling between code
->> inside and outside interrupt context likely to affect performance?
+B6:
+    In a conceivable implementation, the priority donation process would 
+    adjust the thread->priority property.  This opens the possibility for 
+    race conditions.  i.e. a thread begins to call set_thread_priority() and 
+    before it can finish, another thread runs on the cpu, attempts to acquire 
+    a lock in the possesion of the first thread, and then attempts to donate 
+    its priority.  Thus, a race to the thread->priority that could affect 
+    scheduling the next_thread_to_run().
+    However, in our implementation the only thing modifying thread->priority is
+    the thread_set_priority() method which can only be called by
+    the thread itself so there will be no race condintions. Note that we do
+    have an owned_locks list that get_priority() used to check for donated prioirty 
+    and modification of that list is protected by interupts and a semaphore. 
 
 ---- RATIONALE ----
 
->> C5: Briefly critique your design, pointing out advantages and
->> disadvantages in your design choices.  If you were to have extra
->> time to work on this part of the project, how might you choose to
->> refine or improve your design?
-
+B7:
+    To address the problem of priority donation, we originally
+    considered using a global data structure to keep
+    track of the relationships of the locks (in the form of a tree),
+    and would consult that when we wanted to get the next highest
+    priority thread to run.
+    However, we found it would be more intuitive for each
+    thread to include a reference to any lock they are currently 
+    waiting on (by means of the waiting_on member of the thread struct).
+    The 'waiting_on' reference could then be used to ensure priority donation
+    maintains transitivity as threads accumulate locks. The 'waiting_on' reference
+    reveals a tree-like structure that represents the relationship of
+    threads and locks that could be used in the implementation of such transitivity.
