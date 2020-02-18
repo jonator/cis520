@@ -30,6 +30,16 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
+  char *prog_name;
+  char *args, *save_ptr;
+
+  prog_name = strtok_r (file_name, " ", &save_ptr);
+  for (args = strtok_r (NULL, " ", &save_ptr); args != NULL;
+    args = strtok_r (NULL, " ", &save_ptr))
+  {
+
+  }
+
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -437,7 +447,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE;
+        *esp = PHYS_BASE - 12;
       else
         palloc_free_page (kpage);
     }
