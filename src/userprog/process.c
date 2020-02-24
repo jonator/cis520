@@ -31,14 +31,22 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
   char *prog_name;
-  char *args, *save_ptr;
+  
 
-  prog_name = strtok_r (file_name, " ", &save_ptr);
-  for (args = strtok_r (NULL, " ", &save_ptr); args != NULL;
-    args = strtok_r (NULL, " ", &save_ptr))
-  {
+  /* Make a copy of FILE_NAME.
+     Otherwise there's a race between the caller and load(). */
+  // fn_copy = palloc_get_page (0);
+  // if (fn_copy == NULL)
+  //   return TID_ERROR;
 
-  }
+  // prog_name = strtok_r (file_name, " ", &save_ptr);
+  
+  // for (args = strtok_r (NULL, " ", &save_ptr); args != NULL;
+  //   args = strtok_r (NULL, " ", &save_ptr))
+  // {
+    //memcpy()
+    //thread_create (prog_name, PRI_DEFAULT, ,args);
+  // }
 
 
   /* Make a copy of FILE_NAME.
@@ -50,6 +58,7 @@ process_execute (const char *file_name)
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -58,9 +67,9 @@ process_execute (const char *file_name)
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *file_name_)
+start_process (void *uprog_signature)
 {
-  char *file_name = file_name_;
+  char *file_name = uprog_signature;
   struct intr_frame if_;
   bool success;
 
@@ -70,6 +79,8 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
+  
+  // user_stack = if_.esp
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -211,20 +222,128 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
+/* Loads user program arguments in stack friendly
+   format at ESP. ARGS sould be of size A[ARGC][]. */
+void
+load_uprog_args (const char **args, int argc, char **esp)
+{
+  int i;
+  const int WORD_SIZE = 4;
+  const int NULL_TERM = 1;
+  int running_arg_size = 0;
+
+  //loop to push the full arg strings
+  for (i = argc - 1; i >= 0; i--)
+  {
+    int argLen = strlen (args[i]) + NULL_TERM;
+    running_arg_size += argLen;
+    *esp -= argLen;
+    memcpy (*esp, args[i], argLen);
+    // TODO - get the pointers straightened out
+    // we want esp to point to something higher 
+    // on esp, not into our heap
+    // memcpy (args + i, *esp, WORD_SIZE);
+  }
+  
+  // word align all args
+  *esp -= WORD_SIZE - running_arg_size % WORD_SIZE;
+
+  //push all the pointers to those args
+  for (i = argc - 1; i >= 0; i--)
+  {
+    *esp -= WORD_SIZE;
+    memcpy (*esp, args + i, WORD_SIZE);
+  }
+
+  //push argc
+  *esp -= WORD_SIZE;
+  **esp = argc;
+  //push bogus return address
+  *esp -= WORD_SIZE;
+  **esp = 0xFFFF;
+}
+
+/* Count number of user program arguments
+   in program signature SIG. */
+int
+count_pargs (char *sig)
+{
+  int argc = 1;
+  for (int i = 0; i < strlen(sig); i++)    
+  {
+    if (sig[i] == ' ')
+    {
+      while (sig[i] == ' ')
+        i++;
+      argc++;
+    }
+  }
+  return argc;
+}
+
+/* Creates uprog arg data structure allocated on heap
+   from user program signature SIG.
+   Array is of size A[ARGC][arg_len].
+   Must be freed at 2 dimensions. */
+char **
+tokenize_uprog_signature (char *sig, int *argc)
+{
+  char **args;
+  char *arg;
+  char *save_ptr;
+  int argc_;
+  char argi;
+
+  // Count the number of arguments
+  argc_ = count_pargs (sig);
+  
+  // Create space to point to each arg
+  args = malloc (sizeof (int) * argc_);
+
+  // Tokenize and copy args
+  argi = 0;
+
+  for (arg = strtok_r (sig, " ", &save_ptr); arg != NULL;
+       arg = strtok_r (NULL, " ", &save_ptr))
+  {
+    int argLen = strlen (arg) + 1;
+    char * currentArg = malloc (sizeof (char) * argLen);
+    strlcpy (currentArg, arg, argLen);
+    args[argi] = currentArg;
+    argi++;
+  }
+
+  *argc = argc_;
+  return args;
+}
+
+/* Frees tokens on heap */
+void free_uprog_sig_tokens(char **tokens, int argc)
+{
+    for (int i = 0; i < argc; i++)
+      free (tokens[i]);
+    free(tokens);
+}
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp) 
+load (const char *program_signature, void (**eip) (void), void **esp) 
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
-  struct file *file = NULL;
+  struct file *    file = NULL;
   off_t file_ofs;
   bool success = false;
   int i;
+  char **pargs;
+  int pargc;
 
+  /* Load each arg into heap mem */
+  pargs = tokenize_uprog_signature(program_signature, &pargc);
+  
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
@@ -232,10 +351,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  file = filesys_open (pargs[0]);
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
+      printf ("load: %s: open failed\n", pargs[0]);
       goto done; 
     }
 
@@ -248,7 +367,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      printf ("load: %s: error loading executable\n", pargs[0]);
       goto done; 
     }
 
@@ -315,6 +434,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (!setup_stack (esp))
     goto done;
 
+  load_uprog_args (pargs, pargc, (char **) esp);
+
+  // hex_dump();
+
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
@@ -323,6 +446,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
  done:
   /* We arrive here whether the load is successful or not. */
   file_close (file);
+  free_uprog_sig_tokens (pargs, pargc);
   return success;
 }
 
@@ -437,7 +561,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp) // pass prog args
 {
   uint8_t *kpage;
   bool success = false;
@@ -447,7 +571,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12;
+        *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
