@@ -231,6 +231,9 @@ load_uprog_args (const char **args, int argc, char **esp)
   const int WORD_SIZE = 4;
   const int NULL_TERM = 1;
   int running_arg_size = 0;
+  int *arg_stack_ptrs;
+
+  arg_stack_ptrs = malloc (sizeof (int) * argc);
 
   //loop to push the full arg strings
   for (i = argc - 1; i >= 0; i--)
@@ -242,7 +245,8 @@ load_uprog_args (const char **args, int argc, char **esp)
     // TODO - get the pointers straightened out
     // we want esp to point to something higher 
     // on esp, not into our heap
-    // memcpy (args + i, *esp, WORD_SIZE);
+    //memcpy (args + i, esp, WORD_SIZE);
+    arg_stack_ptrs[i] = *esp;
   }
   
   // word align all args
@@ -252,7 +256,7 @@ load_uprog_args (const char **args, int argc, char **esp)
   for (i = argc - 1; i >= 0; i--)
   {
     *esp -= WORD_SIZE;
-    memcpy (*esp, args + i, WORD_SIZE);
+    memcpy (*esp, arg_stack_ptrs + i, WORD_SIZE);
   }
 
   //push argc
@@ -261,6 +265,7 @@ load_uprog_args (const char **args, int argc, char **esp)
   //push bogus return address
   *esp -= WORD_SIZE;
   **esp = 0xFFFF;
+  free (arg_stack_ptrs);
 }
 
 /* Count number of user program arguments
