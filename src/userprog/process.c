@@ -31,23 +31,6 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
   char *prog_name;
-  
-
-  /* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
-  // fn_copy = palloc_get_page (0);
-  // if (fn_copy == NULL)
-  //   return TID_ERROR;
-
-  // prog_name = strtok_r (file_name, " ", &save_ptr);
-  
-  // for (args = strtok_r (NULL, " ", &save_ptr); args != NULL;
-  //   args = strtok_r (NULL, " ", &save_ptr))
-  // {
-    //memcpy()
-    //thread_create (prog_name, PRI_DEFAULT, ,args);
-  // }
-
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
