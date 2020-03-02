@@ -3,6 +3,7 @@
     "liveshare.allowGuestDebugControl": true,
     "files.associations": {
         "complex": "c",
-        "sched.h": "c"
+        "sched.h": "c",
+        "malloc.h": "c"
     }
 }

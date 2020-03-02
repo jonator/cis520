@@ -235,12 +235,21 @@ load_uprog_args (const char **args, int argc, char **esp)
   // word align all args
   *esp -= WORD_SIZE - running_arg_size % WORD_SIZE;
 
+  *esp -= WORD_SIZE;
+  memset (*esp, 0, WORD_SIZE);
   //push all the pointers to those args
   for (i = argc - 1; i >= 0; i--)
   {
     *esp -= WORD_SIZE;
     memcpy (*esp, arg_stack_ptrs + i, WORD_SIZE);
   }
+
+  //push argv
+  char *argv = malloc (sizeof (char *));
+  memcpy (argv, esp, WORD_SIZE);
+  *esp -= WORD_SIZE;
+  memcpy (*esp, argv, WORD_SIZE);
+  //**esp = (int) *esp + WORD_SIZE;  
 
   //push argc
   *esp -= WORD_SIZE;
