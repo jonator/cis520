@@ -9,15 +9,22 @@
 #include "userprog/pagedir.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
+#include "filesys/inode.h"
+#include "lib/string.h"
 #include <list.h>
+#include "devices/input.h"
 
 struct open_file {
     int fd;
     struct file *file;
+    char *file_name;
     struct list_elem elem;
 };
-struct file *get_file (int);
+struct open_file *open_file_create (struct file*, const char*);
+struct open_file *get_open_file (int);
+struct open_file *get_open_file_by_name (const char*);
 
+bool is_valid_user_pointer (void *);
 static void syscall_handler (struct intr_frame *);
 void halt (void);
 void exit (int);
@@ -33,19 +40,57 @@ void seek (int, unsigned);
 unsigned tell (int);
 void close (int);
 
-struct file
-*get_file(int fd)
+struct open_file
+*open_file_create (struct file *file, const char *file_name)
+{
+  struct thread *t = thread_current ();
+  struct open_file *new_open_file = malloc (sizeof(struct open_file));
+  new_open_file->fd = t->next_fd++;
+  new_open_file->file = file;
+
+  int len = strlen (file_name);
+  new_open_file->file_name = malloc (sizeof (char) * len + 1);
+  memcpy (new_open_file->file_name, file_name, len);
+
+  list_push_back (&t->open_files, &new_open_file->elem);
+  
+  return new_open_file;
+}
+
+struct open_file
+*get_open_file(int fd)
 {
   struct list *open_files = &thread_current ()->open_files;
-  struct list_elem *open_file;
   
-  struct list_elem *e;
-  for (e = list_begin (&open_files); e != list_end (&open_files);
-      e = list_next (e))
+  if (!list_empty (open_files))
   {
-    struct open_file *cur = list_entry (e, struct open_file, elem);
-    if (cur->fd == fd)
-      return cur;
+    struct list_elem *e;
+    for (e = list_begin (open_files); e != list_end (open_files);
+        e = list_next (e))
+    {
+      struct open_file *cur = list_entry (e, struct open_file, elem);
+      if (cur->fd == fd)
+        return cur;
+    }
+  }
+  return NULL;
+}
+
+struct open_file
+*get_open_file_by_name (const char *file_name)
+{
+  struct list *open_files = &thread_current ()->open_files;
+  
+  if (!list_empty (open_files))
+  {
+    struct list_elem *e;
+    for (e = list_begin (open_files); e != list_end (open_files);
+        e = list_next (e))
+    {
+      struct open_file *cur = list_entry (e, struct open_file, elem);
+      if (strcmp (file_name, cur->file_name) == 0)
+        return cur;
+    }
   }
   return NULL;
 }
@@ -75,6 +120,7 @@ syscall_handler (struct intr_frame *f)
   int size;
   void *buffer;
   unsigned int position;
+  int return_value = NULL;
 
   switch (*((int*)f->esp))
   {
@@ -86,41 +132,41 @@ syscall_handler (struct intr_frame *f)
       exit (status);
       break;
     case SYS_WAIT:
-      pid = (int) (f->esp + sizeof(int));
-      wait (pid);
+      pid = *((int*) (f->esp + sizeof(int)));
+      return_value = wait (pid);
       break;
     case SYS_CREATE:
       file = (char*) *((int*) (f->esp + sizeof(int)));
       initial_size = *((int*) (f->esp + sizeof(int) * 2));
-      create (file, initial_size);
+      return_value = (int) create (file, initial_size);
       break;
     case SYS_REMOVE:
       file = (char*) *((int*) (f->esp + sizeof(int)));
       if (is_valid_user_pointer (file))
-        remove (file);
+        return_value = (int) remove (file);
       break;
     case SYS_OPEN:
       file = (char*) *((int*) (f->esp + sizeof(int)));
       if (is_valid_user_pointer (file))
-        open (file);
+        return_value = open (file);
       break;
     case SYS_FILESIZE:
       fd = *((int*) (f->esp + sizeof(int)));
-      filesize (fd);
+      return_value = filesize (fd);
       break;
     case SYS_READ:
       fd = *((int*) (f->esp + sizeof(int)));
       buffer = (void*) *((int*) (f->esp + sizeof(int) * 2));
-      size = 0;
+      size = *((int*) (f->esp + sizeof(int) * 3));
       if (is_valid_user_pointer (buffer))
-        read (fd, buffer, size);
+        return_value = read (fd, buffer, size);
       break;
     case SYS_WRITE:
       fd = *((int*) (f->esp + sizeof(int)));
       buffer = (void*) *((int*) (f->esp + sizeof(int) * 2));
       size = *((int*) (f->esp + sizeof(int) * 3));
       if (is_valid_user_pointer (buffer))
-        write (fd, buffer, size);
+        return_value = write (fd, buffer, size);
       break;
     case SYS_SEEK:
       fd = *((int*) (f->esp + sizeof(int)));
@@ -129,19 +175,21 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_TELL:
       fd = *((int*) (f->esp + sizeof(int)));
-      tell (fd);
+      return_value = (int) tell (fd);
       break;
     case SYS_CLOSE:
       fd = *((int*) (f->esp + sizeof(int)));
       close (fd);
       break;
   }
+
+  // set callers's return registers
+  f->eax = return_value;
 }
 
 void
 halt (void)
 {
-  // TODO - Terminate Pintos by shutdown_calling power_off()
   shutdown_power_off ();
   thread_exit ();
 }
@@ -170,44 +218,73 @@ wait (pid_t p)
 bool
 create (const char *file, unsigned initial_size)
 {
-  // TODO
-  return false;
+  return filesys_create (file, initial_size);
 }
 
 bool
 remove (const char *file)
 {
-  // TODO
-  return false;
+  struct file *opened_file = filesys_open (file);
+  if (opened_file == NULL)
+    return false;
+  inode_remove (file_get_inode (opened_file));
+  return true;
 }
 
 int 
 open (const char *file)
 {
-  struct file *opened_file = filesys_open (file);
-  if (opened_file == NULL)
-    return -1;
+  struct open_file *opened_file = get_open_file_by_name (file);
+  struct file *file_ptr;
+  if (opened_file != NULL)
+  {
+    file_ptr = file_reopen (opened_file->file);
+  }
+  else
+  {
+    file_ptr = filesys_open (file);
+    if (file_ptr == NULL)
+      return -1;
+  }
 
-  struct thread *t = thread_current ();
-  struct open_file *new_open_file = malloc (sizeof(struct open_file));
-  new_open_file->fd = t->next_fd++;
-  new_open_file->file = opened_file;
-  list_push_back (&t->open_files, &new_open_file->elem);
-  
-  return new_open_file->fd;
+  return open_file_create (file_ptr, file)->fd;
 }
 
 int
 filesize (int fd)
 {
-  // TODO
-  return 0;
+  return file_length (get_open_file (fd)->file);
 }
 
 int
 read (int fd, void *buffer, unsigned size)
 {
-  // TODO
+  unsigned read_bytes;
+  switch (fd)
+  {
+    case 0:
+      read_bytes = 0;
+      while (read_bytes < size)
+      {
+        uint8_t key = input_getc ();
+        memcpy (buffer, &key, sizeof (uint8_t));
+        buffer += sizeof (uint8_t);
+        read_bytes++;
+      }
+      return read_bytes;
+    case 1:
+      break;
+    default:
+      if (fd > 1)
+      {
+        struct file *file = get_open_file (fd)->file;
+        if (file != NULL)
+        {
+          return file_read (file, buffer, size);
+        }
+      }
+      break;
+  }
   return 0;
 }
 
@@ -217,13 +294,14 @@ write (int fd, const void *buffer, unsigned size)
   switch (fd)
   {
     case 0:
+      break;
     case 1:
       putbuf (buffer, size);
       return size;
     default:
       if (fd > 1)
       {
-        struct file *file = get_file (fd);
+        struct file *file = get_open_file (fd)->file;
         if (file != NULL)
         {
           return file_write (file, buffer, size);
@@ -237,18 +315,21 @@ write (int fd, const void *buffer, unsigned size)
 void
 seek (int fd, unsigned position)
 {
-  // TODO
+  file_seek (get_open_file (fd)->file, position);
 }
 
 unsigned
 tell (int fd)
 {
-  // TODO
-  return 0;
+  return file_tell ( get_open_file (fd)->file );
 }
 
 void
 close (int fd)
 {
-  // TODO
+  struct open_file *open_file = get_open_file (fd);
+  file_close (open_file->file);
+  list_remove (&open_file->elem);
+  free (open_file->file_name);
+  free (open_file);
 }
