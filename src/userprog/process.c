@@ -92,7 +92,11 @@ start_process (void *uprog_signature)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  // if any of the immediate conditions occur, anything is invalid
   return -1;
+
+  // if child is still running
+      // block thread, will be woken up by child->exit()
 }
 
 /* Free the current process's resources. */

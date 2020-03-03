@@ -197,7 +197,9 @@ halt (void)
 void
 exit (int status)
 {
-  // TODO return status to kernel
+  // TODO 
+  // if has parent and is the blocker, call thread_unblock(parent)
+  // return status to kernel
   thread_exit ();
 }
 
@@ -205,6 +207,8 @@ pid_t
 exec (const char *cmd_line)
 {
   // TODO
+  // Store pid_t in list of children
+  // run and yield
   return 0;
 }
 
@@ -212,6 +216,7 @@ int
 wait (pid_t p)
 {
   // TODO
+  // return process_wait(p)
   return 0;
 }
 

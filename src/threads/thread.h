@@ -97,7 +97,9 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     struct list open_files;             /* List of open files and fd's. */
-    int next_fd;
+    int next_fd;                        /* Stores next fd to id open file */
+    struct list children;               /* Stores list of children pid_t */
+    struct thread *parent;
 #endif
 
     /* Owned by thread.c. */
