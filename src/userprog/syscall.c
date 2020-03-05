@@ -226,6 +226,8 @@ exit (int status)
   // return status to kernel
   struct thread *cur = thread_current ();
 
+  printf("%s: exit(%d)\n", cur->name, status);
+
   if (cur->is_blocking_parent)
   {
     //Wakeup parent
