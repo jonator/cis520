@@ -4,6 +4,7 @@
     "files.associations": {
         "complex": "c",
         "sched.h": "c",
-        "malloc.h": "c"
+        "malloc.h": "c",
+        "intr-stubs.h": "c"
     }
 }

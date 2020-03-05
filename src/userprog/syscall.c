@@ -25,6 +25,27 @@ struct open_file *open_file_create (struct file*, const char*);
 struct open_file *get_open_file (int);
 struct open_file *get_open_file_by_name (const char*);
 
+struct process_exit_record
+{
+  pid_t pid;
+  int exit_status;
+  struct list_elem elem;
+};
+void process_exit_record_init (struct process_exit_record*, pid_t, int);
+
+struct process_parent_child
+{
+  struct thread *parent;
+  pid_t child_pid;
+  bool is_blocking_parent;
+  bool is_parent_alive;
+  struct list_elem elem;
+};
+void process_parent_child_init (struct process_parent_child*, struct thread*);
+
+static struct list process_exit_records;
+static struct list process_children;
+
 bool is_valid_user_pointer (void *);
 static void syscall_handler (struct intr_frame *);
 void halt (void);
@@ -40,7 +61,22 @@ int write (int, const void *, unsigned);
 void seek (int, unsigned);
 unsigned tell (int);
 void close (int);
-bool try_get_child (pid_t, struct thread*);
+
+void
+process_exit_record_init (struct process_exit_record *r, pid_t pid, int status)
+{
+  r->pid = pid;
+  r->exit_status = status;
+}
+
+void
+process_parent_child_init (struct process_parent_child *pc, struct thread *parent)
+{
+  pc->parent = parent;
+  pc->is_blocking_parent = false;
+  pc->is_parent_alive = true;
+  pc->child_pid = NULL;
+}
 
 struct open_file
 *open_file_create (struct file *file, const char *file_name)
@@ -98,27 +134,6 @@ struct open_file
 }
 
 bool
-try_get_child (pid_t pid, struct thread *t)
-{
-  struct list *all_children = &thread_current ()->children;
-  if (!list_empty (all_children))
-  {
-    struct list_elem *e;
-    for (e = list_begin (all_children); e != list_end (all_children);
-        e = list_next (e))
-    {
-      struct thread *cur = list_entry (e, struct thread, child_elem);
-      if (cur->tid == pid)
-      {
-        t = cur;
-        return true;
-      }
-    }
-  } 
-  return false;
-}
-
-bool
 is_valid_user_pointer (void *vaddr)
 {
   return vaddr != NULL 
@@ -129,6 +144,8 @@ is_valid_user_pointer (void *vaddr)
 void
 syscall_init (void) 
 {
+  list_init (&process_exit_records);
+  list_init (&process_children);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -218,22 +235,121 @@ halt (void)
   thread_exit ();
 }
 
+bool
+try_get_process_parent_child (pid_t child_pid
+                            , struct process_parent_child **ppc)
+{
+  if (!list_empty (&process_children))
+  {
+    struct list_elem *e;
+    for (e = list_begin (&process_children); e != list_end (&process_children);
+        e = list_next (e))
+    {
+      struct process_parent_child *cur = list_entry (e, struct process_parent_child, elem);
+      if (cur->child_pid == child_pid)
+        *ppc = cur;
+        return true;
+    }
+  }
+  return false;
+}
+
+void
+push_exit_records (pid_t pid, int status)
+{
+  struct process_exit_record *p_exit = malloc (sizeof (struct process_exit_record));
+  process_exit_record_init (p_exit, pid, status);
+  list_push_back (&process_exit_records, p_exit);
+}
+
+bool
+try_remove_exit_records (pid_t pid)
+{
+  if (!list_empty (&process_exit_records))
+  {
+    struct list_elem *e;
+    for (e = list_begin (&process_exit_records);
+        e != list_end (&process_exit_records);
+        e = list_next (e))
+    {
+      struct process_exit_record *cur = list_entry (e
+                                            , struct process_exit_record
+                                            , elem);
+      if (cur->pid == pid)
+      {
+        list_remove (&cur->elem);
+        free (cur);
+        return true;
+      }      
+    }
+  }
+  return false;
+}
+
+void
+exit_as_parent (tid_t parent)
+{
+  if (!list_empty (&process_children))
+  {
+    struct list_elem *e;
+    for (e = list_begin (&process_children); e != list_end (&process_children);
+        e = list_next (e))
+    {
+      struct process_parent_child *cur = list_entry (e, struct process_parent_child, elem);
+      if (cur->parent->tid == parent)
+      {
+        if (try_remove_exit_records (cur->child_pid))
+        {
+          list_remove (&cur->elem);
+          free (cur);
+        }
+        else
+        {
+          cur->is_parent_alive = false;
+        }
+      }
+    }
+  }
+}
+
+void
+exit_as_child (pid_t child, int status)
+{
+  struct process_parent_child *ppc;
+  if (try_get_process_parent_child (child, &ppc))
+  {
+    if (ppc->is_parent_alive)
+    {
+      push_exit_records ((pid_t) child, status);
+      if (ppc->is_blocking_parent)
+      {
+        thread_unblock (ppc->parent);
+      }
+    }
+    else
+    {
+      list_remove (&ppc->elem);
+      free (ppc);
+    }
+  }
+  else
+  {
+    // parent hasn't returned from thread_create
+    // child exited
+    push_exit_records (child, status);
+  }
+}
+
+
 void
 exit (int status)
 {
-  // TODO 
-  // if has parent and is the blocker, call thread_unblock(parent)
-  // return status to kernel
   struct thread *cur = thread_current ();
-
   printf("%s: exit(%d)\n", cur->name, status);
 
-  if (cur->is_blocking_parent)
-  {
-    //Wakeup parent
-    list_remove (&cur->child_elem);
-    thread_unblock (cur->parent);
-  }
+  exit_as_parent (cur->tid);
+  exit_as_child (cur->tid, status);
+
   thread_exit ();
 }
 
@@ -241,37 +357,44 @@ pid_t
 exec (const char *cmd_line)
 {
   // TODO
-  // Store pid_t in list of children
-  // run and yield
-  tid_t new_proc = process_execute (cmd_line);
+  struct thread *cur = thread_current ();
+  struct process_parent_child *p_child = malloc (sizeof (struct process_parent_child));
+  process_parent_child_init (p_child, cur);
+  list_push_back (&process_children, &p_child->elem);
+  p_child->child_pid = process_execute (cmd_line);
+
   thread_current_add_child (new_proc);
   
   return (pid_t) new_proc;
 }
 
+bool
+try_get_child (pid_t pid, struct thread *t)
+{
+  struct list *all_children = &thread_current ()->children;
+  if (!list_empty (all_children))
+  {
+    struct list_elem *e;
+    for (e = list_begin (all_children); e != list_end (all_children);
+        e = list_next (e))
+    {
+      struct thread *cur = list_entry (e, struct thread, child_elem);
+      if (cur->tid == pid)
+      {
+        t = cur;
+        return true;
+      }
+    }
+  } 
+  return false;
+}
+
 int
 wait (pid_t p)
 {
-  /* TODO
-  Conditions to return -1: 
-    * if child was killed by kernel (didn't call exit)
-    * if p is not a direct child of thread_current
-    * if thread_current already called wait on p
-  */
-  struct thread *child;
-  if (try_get_child (p, child))
-  {
-    if (child->status != THREAD_DYING)
-    {
-      child->is_blocking_parent = true;
-      return process_wait (child->tid);
-    }
-    else
-    {
-      list_remove (&child->child_elem);      
-    }
-  }
-  return -1;
+  // all wait functionality needs to be in process_wait ()
+  // may mean we expose a lot from this file
+  return process_wait (p);
 }
 
 bool

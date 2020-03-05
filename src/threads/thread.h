@@ -100,11 +100,6 @@ struct thread
     struct list open_files;             /* List of open files and fd's. */
     int next_fd;                        /* Stores next fd to id open file */
 
-    /* Manages parent-child processes */
-    struct list children;               /* Stores list of children threads */
-    struct list_elem child_elem;        /* Put thread in parent's children list*/
-    struct thread *parent;              /* Reference to parent */
-    bool is_blocking_parent;            /* Indicates if parent called wait */
 #endif
 
     /* Owned by thread.c. */
@@ -127,8 +122,8 @@ typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
 #if USERPROG
-/* Add thread tid_t to current thread's children list */
-void thread_current_add_child (tid_t);
+/* Get a thread from it's tid */
+struct thread *get_thread (tid_t);
 #endif
 
 void thread_block (void);
