@@ -204,9 +204,31 @@ thread_create (const char *name, int priority,
   return tid;
 }
 
+struct thread
+*get_thread (tid_t tid)
+{
+  struct list_elem *e;
+  for (e = list_begin (&all_list); e != list_end (&all_list);
+        e = list_next (e))
+  {
+    struct thread *cur = list_entry (e, struct thread, elem);
+    if (cur->tid  == tid)
+      return cur;
+  }
+
+  return NULL;
+}
+
+void
+thread_current_add_child (tid_t child_tid)
+{
+  struct thread *child_thread = get_thread (child_tid);
+  list_push_back (&thread_current ()->children, child_thread);
+}
+
 /* Puts the current thread to sleep.  It will not be scheduled
    again until awoken by thread_unblock().
-
+   
    This function must be called with interrupts turned off.  It
    is usually a better idea to use one of the synchronization
    primitives in synch.h. */
@@ -467,6 +489,7 @@ init_thread (struct thread *t, const char *name, int priority)
 #ifdef USERPROG
   list_init (&t->open_files);
   t->next_fd = 2;
+  list_init (&t->children);
 #endif
 
   old_level = intr_disable ();

@@ -7,6 +7,7 @@
 #include "threads/vaddr.h"
 #include "threads/pte.h"
 #include "userprog/pagedir.h"
+#include "userprog/process.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "filesys/inode.h"
@@ -39,6 +40,7 @@ int write (int, const void *, unsigned);
 void seek (int, unsigned);
 unsigned tell (int);
 void close (int);
+bool try_get_child (pid_t, struct thread*);
 
 struct open_file
 *open_file_create (struct file *file, const char *file_name)
@@ -93,6 +95,27 @@ struct open_file
     }
   }
   return NULL;
+}
+
+bool
+try_get_child (pid_t pid, struct thread *t)
+{
+  struct list *all_children = &thread_current ()->children;
+  if (!list_empty (all_children))
+  {
+    struct list_elem *e;
+    for (e = list_begin (all_children); e != list_end (all_children);
+        e = list_next (e))
+    {
+      struct thread *cur = list_entry (e, struct thread, child_elem);
+      if (cur->tid == pid)
+      {
+        t = cur;
+        return true;
+      }
+    }
+  } 
+  return false;
 }
 
 bool
@@ -190,7 +213,8 @@ syscall_handler (struct intr_frame *f)
 void
 halt (void)
 {
-  shutdown_power_off ();
+  //TODO - not done yet
+  shutdown_power_off (); // not right
   thread_exit ();
 }
 
@@ -200,6 +224,14 @@ exit (int status)
   // TODO 
   // if has parent and is the blocker, call thread_unblock(parent)
   // return status to kernel
+  struct thread *cur = thread_current ();
+
+  if (cur->is_blocking_parent)
+  {
+    //Wakeup parent
+    list_remove (&cur->child_elem);
+    thread_unblock (cur->parent);
+  }
   thread_exit ();
 }
 
@@ -209,15 +241,35 @@ exec (const char *cmd_line)
   // TODO
   // Store pid_t in list of children
   // run and yield
-  return 0;
+  tid_t new_proc = process_execute (cmd_line);
+  thread_current_add_child (new_proc);
+  
+  return (pid_t) new_proc;
 }
 
 int
 wait (pid_t p)
 {
-  // TODO
-  // return process_wait(p)
-  return 0;
+  /* TODO
+  Conditions to return -1: 
+    * if child was killed by kernel (didn't call exit)
+    * if p is not a direct child of thread_current
+    * if thread_current already called wait on p
+  */
+  struct thread *child;
+  if (try_get_child (p, child))
+  {
+    if (child->status != THREAD_DYING)
+    {
+      child->is_blocking_parent = true;
+      return process_wait (child->tid);
+    }
+    else
+    {
+      list_remove (&child->child_elem);      
+    }
+  }
+  return -1;
 }
 
 bool
