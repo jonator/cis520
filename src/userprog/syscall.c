@@ -132,6 +132,19 @@ is_valid_user_pointer (void *vaddr)
 }
 
 void
+*get_param (int height, struct intr_frame *f)
+{
+  for (int i = height * 4; i <= height * 4 + 4; i++)
+  {
+    if (!is_valid_user_pointer (f->esp + i))
+    {
+      exit (-1);
+    }
+  }
+  return f->esp + sizeof (int) * height;
+}
+
+void
 syscall_init (void) 
 {
   list_init (&process_exit_records);
@@ -152,63 +165,63 @@ syscall_handler (struct intr_frame *f)
   unsigned int position;
   int return_value = NULL;
 
-  switch (*((int*)f->esp))
+  switch (*((int*) get_param (0, f)))
   {
     case SYS_HALT:
       halt ();
       break;
     case SYS_EXIT:
-      status = *((int*) (f->esp + sizeof(int)));
+      status = *((int*) get_param(1, f));
       exit (status);
       break;
     case SYS_WAIT:
-      pid = *((int*) (f->esp + sizeof(int)));
+      pid = *((int*) get_param(1, f));
       return_value = wait (pid);
       break;
     case SYS_CREATE:
-      file = (char*) *((int*) (f->esp + sizeof(int)));
-      initial_size = *((int*) (f->esp + sizeof(int) * 2));
+      file = (char*) *((int*) get_param(1, f));
+      initial_size = *((int*) get_param(2, f));
       return_value = (int) create (file, initial_size);
       break;
     case SYS_REMOVE:
-      file = (char*) *((int*) (f->esp + sizeof(int)));
+      file = (char*) *((int*) get_param(1, f));
       if (is_valid_user_pointer (file))
         return_value = (int) remove (file);
       break;
     case SYS_OPEN:
-      file = (char*) *((int*) (f->esp + sizeof(int)));
+      file = (char*) *((int*) get_param(1, f));
       if (is_valid_user_pointer (file))
         return_value = open (file);
       break;
     case SYS_FILESIZE:
-      fd = *((int*) (f->esp + sizeof(int)));
+      fd = *((int*) get_param(1, f));
       return_value = filesize (fd);
       break;
     case SYS_READ:
-      fd = *((int*) (f->esp + sizeof(int)));
-      buffer = (void*) *((int*) (f->esp + sizeof(int) * 2));
-      size = *((int*) (f->esp + sizeof(int) * 3));
+      fd = *((int*) get_param(1, f));
+      buffer = (void*) *((int*) get_param(2, f));
+      size = *((int*) get_param(3, f));
       if (is_valid_user_pointer (buffer))
         return_value = read (fd, buffer, size);
       break;
     case SYS_WRITE:
-      fd = *((int*) (f->esp + sizeof(int)));
-      buffer = (void*) *((int*) (f->esp + sizeof(int) * 2));
-      size = *((int*) (f->esp + sizeof(int) * 3));
+      fd = *((int*) get_param(1, f));
+      buffer = (void*) *((int*) get_param(2, f));
+      size = *((int*) get_param(3, f));
       if (is_valid_user_pointer (buffer))
         return_value = write (fd, buffer, size);
       break;
     case SYS_SEEK:
-      fd = *((int*) (f->esp + sizeof(int)));
-      position = *((int*) (f->esp + sizeof(int) * 2));
+      fd = *((int*) get_param(1, f));
+      position = *((int*) get_param(2, f));
       seek (fd, position);
       break;
     case SYS_TELL:
-      fd = *((int*) (f->esp + sizeof(int)));
+      fd = *((int*) get_param(1, f));
       return_value = (int) tell (fd);
       break;
     case SYS_CLOSE:
-      fd = *((int*) (f->esp + sizeof(int)));
+      fd = *((int*) get_param(1, f));
       close (fd);
       break;
   }
@@ -353,6 +366,7 @@ exit_as_parent (tid_t parent)
       {
         if (try_remove_exit_records (cur->child_pid))
         {
+          e = e->prev;  //Avoid page faults with broken loop
           list_remove (&cur->elem);
           free (cur);
         }
