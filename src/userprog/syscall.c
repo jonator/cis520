@@ -6,6 +6,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/pte.h"
+#include "threads/synch.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "filesys/filesys.h"
@@ -24,20 +25,23 @@ struct open_file {
 struct open_file *open_file_create (struct file*, const char*);
 struct open_file *get_open_file (int);
 struct open_file *get_open_file_by_name (const char*);
+static struct lock open_files_lock; // Lock for lists on threads
 
 void process_exit_record_init (struct process_exit_record*, pid_t, int);
-
 void process_parent_child_init (struct process_parent_child*, struct thread*);
 
 static struct list process_exit_records;
+static struct lock process_exit_records_lock;
+
 static struct list process_children;
+static struct lock process_children_lock;
 
 bool is_valid_user_pointer (void *);
 static void syscall_handler (struct intr_frame *);
 void halt (void);
 void exit_as_child (pid_t child, int status);
 bool try_remove_exit_records (pid_t pid);
-void push_exit_records (pid_t pid, int status);
+void create_push_exit_records (pid_t pid, int status);
 void exit_as_parent (tid_t parent);
 void exit (int);
 pid_t exec (const char *);
@@ -80,7 +84,9 @@ struct open_file
   new_open_file->file_name = malloc (sizeof (char) * len + 1);
   memcpy (new_open_file->file_name, file_name, len);
 
+  lock_acquire (&open_files_lock);
   list_push_back (&t->open_files, &new_open_file->elem);
+  lock_release (&open_files_lock);
   
   return new_open_file;
 }
@@ -89,7 +95,8 @@ struct open_file
 *get_open_file(int fd)
 {
   struct list *open_files = &thread_current ()->open_files;
-  
+  struct open_file *found_open_file = NULL;
+  lock_acquire (&open_files_lock);
   if (!list_empty (open_files))
   {
     struct list_elem *e;
@@ -98,17 +105,22 @@ struct open_file
     {
       struct open_file *cur = list_entry (e, struct open_file, elem);
       if (cur->fd == fd)
-        return cur;
+      {
+        found_open_file = cur;
+        break;
+      }
     }
   }
-  return NULL;
+  lock_release (&open_files_lock);
+  return found_open_file;
 }
 
 struct open_file
 *get_open_file_by_name (const char *file_name)
 {
   struct list *open_files = &thread_current ()->open_files;
-  
+  struct open_file *found_open_file = NULL;
+  lock_acquire (&open_files_lock);
   if (!list_empty (open_files))
   {
     struct list_elem *e;
@@ -117,10 +129,14 @@ struct open_file
     {
       struct open_file *cur = list_entry (e, struct open_file, elem);
       if (strcmp (file_name, cur->file_name) == 0)
-        return cur;
+      {
+        found_open_file = cur;
+        break;
+      }
     }
   }
-  return NULL;
+  lock_release (&open_files_lock);
+  return found_open_file;
 }
 
 bool
@@ -146,6 +162,9 @@ syscall_init (void)
 {
   list_init (&process_exit_records);
   list_init (&process_children);
+  lock_init (&open_files_lock);
+  lock_init (&process_children_lock);
+  lock_init (&process_exit_records_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -248,6 +267,8 @@ bool
 try_get_process_parent_child (pid_t child_pid
                             , struct process_parent_child **ppc)
 {
+  bool is_found = false;
+  lock_acquire (&process_children_lock);
   if (!list_empty (&process_children))
   {
     struct list_elem *e;
@@ -258,16 +279,20 @@ try_get_process_parent_child (pid_t child_pid
       if (cur->child_pid == child_pid)
       {
         *ppc = cur;
-        return true;
+        is_found = true;
+        break;
       }
     }
   }
-  return false;
+  lock_release (&process_children_lock);
+  return is_found;
 }
 
 struct process_exit_record
 *get_process_exit_record (pid_t child_pid)
 {
+  struct process_exit_record *found_per = NULL;
+  lock_acquire (&process_exit_records_lock);
   if (!list_empty (&process_exit_records))
   {
     struct list_elem *e;
@@ -277,24 +302,30 @@ struct process_exit_record
       struct process_exit_record *cur = list_entry (e, struct process_exit_record, elem);
       if (cur->child_pid == child_pid)
       {
-        return cur;
+        found_per = cur;
+        break;
       }
     }
   }
-  return NULL;
+  lock_release (&process_exit_records_lock);
+  return found_per;
 }
 
 void
-push_exit_records (pid_t pid, int status)
+create_push_exit_records (pid_t pid, int status)
 {
   struct process_exit_record *p_exit = malloc (sizeof (struct process_exit_record));
   process_exit_record_init (p_exit, pid, status);
+  lock_acquire (&process_exit_records_lock);
   list_push_back (&process_exit_records, &p_exit->elem);
+  lock_release (&process_exit_records_lock);
 }
 
 bool
 try_remove_exit_records (pid_t pid)
 {
+  bool is_found = false;
+  lock_acquire (&process_exit_records_lock);
   if (!list_empty (&process_exit_records))
   {
     struct list_elem *e;
@@ -309,16 +340,20 @@ try_remove_exit_records (pid_t pid)
       {
         list_remove (&cur->elem);
         free (cur);
-        return true;
+        is_found = true;
+        break;
       }      
     }
   }
-  return false;
+  lock_release (&process_exit_records_lock);
+  return is_found;
 }
 
 bool
 has_process_exit_record (pid_t pid)
 {
+  bool is_found = false;
+  lock_acquire (&process_exit_records_lock);
   if (!list_empty (&process_exit_records))
   {
     struct list_elem *e;
@@ -328,16 +363,19 @@ has_process_exit_record (pid_t pid)
       struct process_exit_record *cur = list_entry (e, struct process_exit_record, elem);
       if (cur->child_pid == pid)
       {
-        return true;
+        is_found = true;
+        break;
       }
     }
   } 
-  return false;
+  lock_release (&process_exit_records_lock);
+  return is_found;
 }
 
 void
 remove_child_records (pid_t child_pid)
 {
+  lock_acquire (&process_children_lock);
   if (!list_empty (&process_children))
   {
     struct list_elem *e;
@@ -351,16 +389,18 @@ remove_child_records (pid_t child_pid)
         {
           list_remove (&cur->elem);
           free (cur);
-          return;
+          break;
         }
       }
     }
-  } 
+  }
+  lock_release (&process_children_lock); 
 }
 
 void
 exit_as_parent (tid_t parent)
 {
+  lock_acquire (&process_children_lock);
   if (!list_empty (&process_children))
   {
     struct list_elem *e;
@@ -380,9 +420,11 @@ exit_as_parent (tid_t parent)
         {
           cur->is_parent_alive = false;
         }
+        break;
       }
     }
   }
+  lock_release (&process_children_lock);
 }
 
 void
@@ -393,7 +435,7 @@ exit_as_child (pid_t child, int status)
   {
     if (ppc->is_parent_alive)
     {
-      push_exit_records ((pid_t) child, status);
+      create_push_exit_records ((pid_t) child, status);
       if (ppc->is_blocking_parent)
       {
         thread_unblock (ppc->parent);
@@ -401,7 +443,9 @@ exit_as_child (pid_t child, int status)
     }
     else
     {
+      lock_acquire (&process_children_lock);
       list_remove (&ppc->elem);
+      lock_release (&process_children_lock);
       free (ppc);
     }
   }
@@ -409,7 +453,7 @@ exit_as_child (pid_t child, int status)
   {
     // parent hasn't returned from thread_create
     // child exited
-    push_exit_records (child, status);
+    create_push_exit_records (child, status);
   }
 }
 
@@ -431,14 +475,15 @@ struct process_parent_child
   struct thread *cur = thread_current ();
   struct process_parent_child *p_child = malloc (sizeof (struct process_parent_child));
   process_parent_child_init (p_child, cur);
-  list_push_back (&process_children, &p_child->elem); 
+  lock_acquire (&process_children_lock);
+  list_push_back (&process_children, &p_child->elem);
+  lock_release (&process_children_lock);
   return p_child; 
 }
 
 pid_t
 exec (const char *cmd_line)
 {
-  // TODO - This likely needs to move most functionality into process_execute
   return process_execute (cmd_line);
 }
 
@@ -446,8 +491,6 @@ exec (const char *cmd_line)
 int
 wait (pid_t p)
 {
-  // all wait functionality needs to be in process_wait ()
-  // may mean we expose a lot from this file
   return process_wait (p);
 }
 
@@ -474,11 +517,15 @@ open (const char *file)
   struct file *file_ptr;
   if (opened_file != NULL)
   {
+    lock_acquire (&open_files_lock);
     file_ptr = file_reopen (opened_file->file);
+    lock_release (&open_files_lock);
   }
   else
   {
+    lock_acquire (&open_files_lock);
     file_ptr = filesys_open (file);
+    lock_release (&open_files_lock);
     if (file_ptr == NULL)
       return -1;
   }
@@ -557,15 +604,17 @@ seek (int fd, unsigned position)
 unsigned
 tell (int fd)
 {
-  return file_tell ( get_open_file (fd)->file );
+  return file_tell (get_open_file (fd)->file);
 }
 
 void
 close (int fd)
 {
   struct open_file *open_file = get_open_file (fd);
+  lock_acquire (&open_files_lock);
   file_close (open_file->file);
   list_remove (&open_file->elem);
+  lock_release (&open_files_lock);
   free (open_file->file_name);
   free (open_file);
 }
