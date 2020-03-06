@@ -27,5 +27,6 @@ bool try_get_process_parent_child (pid_t pid, struct process_parent_child **ppc)
 struct process_exit_record *get_process_exit_record (pid_t child_pid);
 bool has_process_exit_record (pid_t pid);
 void remove_child_records (pid_t child_pid);
+void exit(int status);
 
 #endif /* userprog/syscall.h */

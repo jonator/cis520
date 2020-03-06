@@ -11,6 +11,8 @@
         "*.tcc": "c",
         "fstream": "c",
         "sstream": "c",
-        "*.def": "c"
+        "*.def": "c",
+        "lib.h": "c",
+        "syn-read.h": "c"
     }
 }
