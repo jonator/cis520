@@ -219,12 +219,6 @@ struct thread
   return NULL;
 }
 
-void
-thread_current_add_child (tid_t child_tid)
-{
-  struct thread *child_thread = get_thread (child_tid);
-  list_push_back (&thread_current ()->children, child_thread);
-}
 
 /* Puts the current thread to sleep.  It will not be scheduled
    again until awoken by thread_unblock().
@@ -489,7 +483,6 @@ init_thread (struct thread *t, const char *name, int priority)
 #ifdef USERPROG
   list_init (&t->open_files);
   t->next_fd = 2;
-  list_init (&t->children);
 #endif
 
   old_level = intr_disable ();

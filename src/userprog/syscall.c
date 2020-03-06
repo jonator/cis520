@@ -25,22 +25,22 @@ struct open_file *open_file_create (struct file*, const char*);
 struct open_file *get_open_file (int);
 struct open_file *get_open_file_by_name (const char*);
 
-struct process_exit_record
-{
-  pid_t pid;
-  int exit_status;
-  struct list_elem elem;
-};
+// struct process_exit_record
+// {
+//   pid_t pid;
+//   int exit_status;
+//   struct list_elem elem;
+// };
 void process_exit_record_init (struct process_exit_record*, pid_t, int);
 
-struct process_parent_child
-{
-  struct thread *parent;
-  pid_t child_pid;
-  bool is_blocking_parent;
-  bool is_parent_alive;
-  struct list_elem elem;
-};
+// struct process_parent_child
+// {
+//   struct thread *parent;
+//   pid_t child_pid;
+//   bool is_blocking_parent;
+//   bool is_parent_alive;
+//   struct list_elem elem;
+// };
 void process_parent_child_init (struct process_parent_child*, struct thread*);
 
 static struct list process_exit_records;
@@ -247,8 +247,31 @@ try_get_process_parent_child (pid_t child_pid
     {
       struct process_parent_child *cur = list_entry (e, struct process_parent_child, elem);
       if (cur->child_pid == child_pid)
+      {
         *ppc = cur;
         return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool
+try_get_process_exit_record (pid_t child_pid
+                            , struct process_exit_record **per)
+{
+  if (!list_empty (&process_exit_records))
+  {
+    struct list_elem *e;
+    for (e = list_begin (&process_exit_records); e != list_end (&process_exit_records);
+        e = list_next (e))
+    {
+      struct process_exit_record *cur = list_entry (e, struct process_exit_record, elem);
+      if (cur->pid == child_pid)
+      {
+        *per = cur;
+        return true;
+      }
     }
   }
   return false;
@@ -356,38 +379,16 @@ exit (int status)
 pid_t
 exec (const char *cmd_line)
 {
-  // TODO
+  // TODO - This likely needs to move most functionality into process_execute
   struct thread *cur = thread_current ();
   struct process_parent_child *p_child = malloc (sizeof (struct process_parent_child));
   process_parent_child_init (p_child, cur);
   list_push_back (&process_children, &p_child->elem);
   p_child->child_pid = process_execute (cmd_line);
 
-  thread_current_add_child (new_proc);
-  
-  return (pid_t) new_proc;
+  return p_child->child_pid;
 }
 
-bool
-try_get_child (pid_t pid, struct thread *t)
-{
-  struct list *all_children = &thread_current ()->children;
-  if (!list_empty (all_children))
-  {
-    struct list_elem *e;
-    for (e = list_begin (all_children); e != list_end (all_children);
-        e = list_next (e))
-    {
-      struct thread *cur = list_entry (e, struct thread, child_elem);
-      if (cur->tid == pid)
-      {
-        t = cur;
-        return true;
-      }
-    }
-  } 
-  return false;
-}
 
 int
 wait (pid_t p)

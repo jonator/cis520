@@ -8,6 +8,7 @@
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
+#include "userprog/syscall.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -92,10 +93,24 @@ start_process (void *uprog_signature)
 int
 process_wait (tid_t child_tid) 
 {
-  // if any of the immediate conditions occur, anything is invalid
+  /*
+   * if try_find process_parent_child record
+   * 
+   *    if child is not in exited_records
+   *      set record's is_blocking_parent to true
+   *      thread_block
+   *    
+   *    Remove parent/child from all lists //can only wait once
+   *    return exit_status from exit records
+   * else
+   * return -1
+  */
+  struct process_parent_child *ppc;
+  if (try_get_process_parent_child (child_tid, &ppc))
+  {
+    
+  }
   return -1;
-
-  
 }
 
 /* Free the current process's resources. */
