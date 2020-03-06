@@ -7,7 +7,7 @@ typedef int pid_t;
 
 struct process_exit_record
 {
-  pid_t pid;
+  pid_t child_pid;
   int exit_status;
   struct list_elem elem;
 };
@@ -22,6 +22,10 @@ struct process_parent_child
 };
 
 void syscall_init (void);
-bool try_get_process_parent_child (pid_t, struct process_parent_child **)
+struct process_parent_child *thread_current_process_parent_child_create (void);
+bool try_get_process_parent_child (pid_t pid, struct process_parent_child **ppc);
+struct process_exit_record *get_process_exit_record (pid_t child_pid);
+bool has_process_exit_record (pid_t pid);
+void remove_child_records (pid_t child_pid);
 
 #endif /* userprog/syscall.h */

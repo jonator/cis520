@@ -40,8 +40,10 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  struct process_parent_child *p_child = thread_current_process_parent_child_create ();
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  p_child->child_pid = tid;
   
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
@@ -93,22 +95,19 @@ start_process (void *uprog_signature)
 int
 process_wait (tid_t child_tid) 
 {
-  /*
-   * if try_find process_parent_child record
-   * 
-   *    if child is not in exited_records
-   *      set record's is_blocking_parent to true
-   *      thread_block
-   *    
-   *    Remove parent/child from all lists //can only wait once
-   *    return exit_status from exit records
-   * else
-   * return -1
-  */
   struct process_parent_child *ppc;
   if (try_get_process_parent_child (child_tid, &ppc))
   {
-    
+    if (!has_process_exit_record (child_tid))
+    {
+      ppc->is_blocking_parent = true;
+      enum intr_level old_level = intr_set_level (INTR_OFF);
+      thread_block ();
+      intr_set_level (old_level);
+    }
+    int exit_status = get_process_exit_record (child_tid)->exit_status;
+    remove_child_records (child_tid);
+    return exit_status;
   }
   return -1;
 }
@@ -450,6 +449,7 @@ load (const char *program_signature, void (**eip) (void), void **esp)
     goto done;
 
   load_uprog_args (pargs, pargc, (char **) esp);
+  strlcpy (t->name, pargs[0], strlen (pargs[0]) + 1);
 
   // hex_dump();
 
