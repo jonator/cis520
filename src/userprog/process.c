@@ -18,10 +18,15 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-#include "threads/synch.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+struct start_process_context
+  {
+    char *file_name;
+    struct thread *parent;
+  };
 
 
 /* Starts a new thread running a user program loaded from
@@ -86,9 +91,8 @@ start_process (void *uprog_signature)
   palloc_free_page (file_name);
   if (success)
   {
-      // thread_yield() - let the parent wake up, see that we successfully loaded, then both 
-  // parent and child can continue
-
+    thread_yield() //let the parent wake up, see that we successfully loaded, then both 
+    // parent and child can continue
   }
   else
   {
