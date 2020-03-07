@@ -6,29 +6,14 @@
 
 ---- GROUP ----
 
->> Fill in the names of your group members.
-
 Jon Ator
 Brandon Fisher
 Miles McLenon
-
----- PRELIMINARIES ----
-
->> If you have any preliminary comments on your submission, notes for the
->> TAs, or extra credit, please give them here.
-
->> Please cite any offline or online sources you consulted while
->> preparing your submission, other than the Pintos documentation, course
->> text, lecture notes, and course staff.
 
 			   ARGUMENT PASSING
 			   ================
 
 ---- DATA STRUCTURES ----
-
->> A1: Copy here the declaration of each new or changed `struct' or
->> `struct' member, global or static variable, `typedef', or
->> enumeration.  Identify the purpose of each in 25 words or less.
 
 A1:
 	No data structures were added for argument passing.  arguments
@@ -36,10 +21,6 @@ A1:
 	stack.
 
 ---- ALGORITHMS ----
-
->> A2: Briefly describe how you implemented argument parsing.  How do
->> you arrange for the elements of argv[] to be in the right order?
->> How do you avoid overflowing the stack page?
 
 A2:
 	Argument passing was implemented within the load function called
@@ -62,26 +43,37 @@ A2:
 
 ---- RATIONALE ----
 
->> A3: Why does Pintos implement strtok_r() but not strtok()?
-
 A3:
-
+	To follow C programming convention, the '_r' extention to 'strtok'
+	indicates that it is a reentrant function. This implementation of
+	'strtok' in is necessary in Pintos due to the possibility of an
+	interrupt occuring. The reentrant version of 'strtok' requires the
+	caller to include a 2-d pointer to keep track of the current
+	location in the source string as strtok() is repeatedly called.
+	A reentrant implementation of 'strtok' stores iteration state on
+	each thread instead of the kernel, thus allowing for safe thread
+	scheduling and system interrupts.
 
 >> A4: In Pintos, the kernel separates commands into an executable name
 >> and arguments.  In Unix-like systems, the shell does this
 >> separation.  Identify at least two advantages of the Unix approach.
 
 A4:
+	Advantage 1:
+		If the shell is able to do the command separation, then it could
+		parse a command as an expression. This allows the user of a UNIX
+		shell to generate command arguments from the output of other commands.
 
+	Advantage 2:
+		In addition, a shell could use strings from configuration files
+		or environment variables instead of the command line exclusively.
+		This could save a UNIX shell user excess typing (alias commands)
+		among other conveniences.
 
 			     SYSTEM CALLS
 			     ============
 
 ---- DATA STRUCTURES ----
-
->> B1: Copy here the declaration of each new or changed `struct' or
->> `struct' member, global or static variable, `typedef', or
->> enumeration.  Identify the purpose of each in 25 words or less.
 
 B1:
 	In Syscall.h
@@ -137,11 +129,6 @@ B1:
 			...
 		}
 
-
->> B2: Describe how file descriptors are associated with open files.
->> Are file descriptors unique within the entire OS or just within a
->> single process?
-
 B2:
 	File descriptors are unique within a single process.  0 and 1 are
 	reserved for I/O so each process is initialized with a variable
@@ -150,11 +137,12 @@ B2:
 	open their first file, each will assign an fd of 2, though the open
 	files are different.
 
-
 ---- ALGORITHMS ----
 
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
+
+B3:
 
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
 >> to be copied from user space into the kernel.  What is the least
@@ -163,8 +151,26 @@ B2:
 >> for a system call that only copies 2 bytes of data?  Is there room
 >> for improvement in these numbers, and how much?
 
->> B5: Briefly describe your implementation of the "wait" system call
->> and how it interacts with process termination.
+B4:
+
+B5:
+	The system call "wait" returns result of process_wait() in process.c
+	Handling wait functionality and the interaction with termination 
+	inside of process_wait allows for consistent behavior whether the 
+	waiting thread is a user program or the kernel 'main' thread.
+
+	Inside process_wait(), we first check for an existing struct
+	process_parent_child.  This is the official record of relationship
+	between parent and child.  If it can't be found, return -1.  Assuming
+	it is found, we check for a process_exit_record from the child
+	process.  If the child hasn't exited yet, we adjust a flag, telling
+	the child that it should awaken the parent on exiting and block the 
+	parent thread.
+
+	When the parent returns from the thread_block, the child will 
+	have exited so we get the appropriate process_exit_record.
+	Then remove both the parent_child relationship record and
+	child exit record before returning the child's exit status.
 
 >> B6: Any access to user program memory at a user-specified address
 >> can fail due to a bad pointer value.  Such accesses must cause the
@@ -180,6 +186,8 @@ B2:
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
 
+B6:
+
 ---- SYNCHRONIZATION ----
 
 >> B7: The "exec" system call returns -1 if loading the new executable
@@ -187,12 +195,54 @@ B2:
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
 
->> B8: Consider parent process P with child process C.  How do you
->> ensure proper synchronization and avoid race conditions when P
->> calls wait(C) before C exits?  After C exits?  How do you ensure
->> that all resources are freed in each case?  How about when P
->> terminates without waiting, before C exits?  After C exits?  Are
->> there any special cases?
+B7:
+	We ensure this by using thread_create to generate the -1 error
+	code. With this implementation, an error return value from
+	thread_create would indicate a failure to start a separate thread
+	thus ensuring atomicity of failure in an invalid environment.
+
+B8:
+	To ensure proper synchronization between P wait and C exit calls
+	we setup structs to track the process_parent_child (PPC) relationships 
+	and the process_exit_record (PER) of child process.  We also have flags 
+	within the process_parent_child that allow the child to track whether
+	the parent is still alive and whether it is currently blocked
+	waiting on the child.
+
+	Case: P calls wait(C) before C exits
+		Find PPC.  Since C has no PER we set PPC flag that the child is 
+		blocking the parent to true. Block the parent.
+		
+		On C exit:
+			Enter the exit_as_child() function to deal with parents.
+			Find PPC, since parent is still alive add a new exit 
+			record PER and since P is blocked by C, unblock(P)
+
+	Case: P calls wait(C) after C exits
+		Find PPC.  Since C has already exited, find PER.
+		Store the PER exit status for later return and remove
+		the PPC and PER records.
+
+	Case: P exits without waiting, before or after C exits
+		Enter the exit_as_parent() function to deal with all
+		of P's children records.
+		Iterate for any PPC that has P as parent.  For each
+		record found:
+		if C has exited:
+			remove the corresponding PPC and PER records
+		if C has not exited:
+			Set PPC flag that says parent is no longer alive.
+			This gives responsibility for cleaning up the record
+			to the child when it eventually exits.
+
+	The most important special case we ran into was the need 
+	to place our functionality within the process_wait and 
+	process_execute functions so that when the main thread 
+	launches a user program, our structures are initialized
+	just as the would be if a user program made a system call
+	to exec.  This allows the main thread to process_wait() on
+	the primary user program and exit appropriately.
+
 
 ---- RATIONALE ----
 
@@ -202,8 +252,23 @@ B2:
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
 
->> B11: The default tid_t to pid_t mapping is the identity mapping.
->> If you changed it, what advantages are there to your approach?
+B10:
+	An advantage of our design for file descriptors is that each
+	thread maintains a list of files and file descriptors that
+	it depends on. This makes working with file descriptors
+	intuitive for Pintos developers, and efficient for the thread
+	accessing them. However a possible disadvantage
+	is in the scenario where multiple processes have the same
+	file opened. Since each thread is unaware of other threads'
+	open files, additional overhead is required to maintain
+	synchronization as files are opened and closed. Locks are
+	held on a file irrespective of another process's lack of
+	dependency on that file.
+
+B11:
+	We maintained the tid_t & pid_t identity mapping. We saw these
+	types as a good way to maintain semantic separation of the identity
+	of a thread and a process.
 
 			   SURVEY QUESTIONS
 			   ================
@@ -216,6 +281,9 @@ the quarter.
 
 >> In your opinion, was this assignment, or any one of the three problems
 >> in it, too easy or too hard?  Did it take too long or too little time?
+
+The project took a long time, but it was a very effective learning tool.
+It is especially effective if outside solutions are not referenced.
 
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design?
