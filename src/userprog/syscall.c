@@ -536,7 +536,10 @@ open (const char *file)
 int
 filesize (int fd)
 {
-  return file_length (get_open_file (fd)->file);
+  struct open_file *open_file = get_open_file (fd);
+  if (open_file != NULL)
+    return file_length (open_file->file);
+  return 0;
 }
 
 int
@@ -613,7 +616,7 @@ tell (int fd)
   {
     return file_tell (open_file->file);
   }
-  return -1;
+  return 0;
 }
 
 void
