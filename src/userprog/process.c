@@ -18,9 +18,11 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -42,7 +44,19 @@ process_execute (const char *file_name)
 
   struct process_parent_child *p_child = thread_current_process_parent_child_create ();
   /* Create a new thread to execute FILE_NAME. */
+
+
+
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  //need to block from continuing here, on the parent thread if child doesn't
+  //load correctly
+  //We might actually be able to do a thread_block
+  // How about loading file first?
+  /*
+    thread_block()
+    if( has_process_exit_record (tid))
+      return -1
+  */
   p_child->child_pid = tid;
   
   if (tid == TID_ERROR)
@@ -70,8 +84,29 @@ start_process (void *uprog_signature)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
+  if (success)
+  {
+      // thread_yield() - let the parent wake up, see that we successfully loaded, then both 
+  // parent and child can continue
+
+  }
+  else
+  {
+  // thread_exit ();
+
+    // exit(-1);
+    /////////////////////This code won't be reached after the call to exit(-1)
+    // Might need to manually add the exit record, then unblock parent, the call thread_exit()
+    // Since we know that the parent is alive waiting on us and the process couldn't have 
+    // spawned any children yet
+    // thread_unblock(parent) (it sees that there is an exit record and returns -1)
+
+  }
+    //I think we should call exit (-1) here
+    //We also need to have some synchronization
+    //so the calling thread won't return from process_execute
+    //until we've determined success in this spot
+
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in

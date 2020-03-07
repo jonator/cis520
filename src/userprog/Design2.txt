@@ -54,10 +54,6 @@ A3:
 	each thread instead of the kernel, thus allowing for safe thread
 	scheduling and system interrupts.
 
->> A4: In Pintos, the kernel separates commands into an executable name
->> and arguments.  In Unix-like systems, the shell does this
->> separation.  Identify at least two advantages of the Unix approach.
-
 A4:
 	Advantage 1:
 		If the shell is able to do the command separation, then it could
@@ -196,6 +192,9 @@ B6:
 >> success/failure status passed back to the thread that calls "exec"?
 
 B7:
+	///////////////////////
+	THIS MAY NOT BE CORRECT:
+	/////////////////////// 
 	We ensure this by using thread_create to generate the -1 error
 	code. With this implementation, an error return value from
 	thread_create would indicate a failure to start a separate thread
@@ -249,8 +248,7 @@ B8:
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
 
->> B10: What advantages or disadvantages can you see to your design
->> for file descriptors?
+B9:
 
 B10:
 	An advantage of our design for file descriptors is that each
