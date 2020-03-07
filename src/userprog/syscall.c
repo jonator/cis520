@@ -560,10 +560,10 @@ read (int fd, void *buffer, unsigned size)
     default:
       if (fd > 1)
       {
-        struct file *file = get_open_file (fd)->file;
-        if (file != NULL)
+        struct open_file *open_file = get_open_file (fd);
+        if (open_file != NULL)
         {
-          return file_read (file, buffer, size);
+          return file_read (open_file->file, buffer, size);
         }
       }
       break;
@@ -584,10 +584,10 @@ write (int fd, const void *buffer, unsigned size)
     default:
       if (fd > 1)
       {
-        struct file *file = get_open_file (fd)->file;
-        if (file != NULL)
+        struct open_file *open_file = get_open_file (fd);
+        if (open_file != NULL)
         {
-          return file_write (file, buffer, size);
+          return file_write (open_file->file, buffer, size);
         }
       }
       break;
@@ -598,23 +598,35 @@ write (int fd, const void *buffer, unsigned size)
 void
 seek (int fd, unsigned position)
 {
-  file_seek (get_open_file (fd)->file, position);
+  struct open_file *open_file = get_open_file (fd);
+  if (open_file != NULL)
+  {
+    file_seek (open_file->file, position);
+  }
 }
 
 unsigned
 tell (int fd)
 {
-  return file_tell (get_open_file (fd)->file);
+  struct open_file *open_file = get_open_file (fd);
+  if (open_file != NULL)
+  {
+    return file_tell (open_file->file);
+  }
+  return -1;
 }
 
 void
 close (int fd)
 {
   struct open_file *open_file = get_open_file (fd);
-  lock_acquire (&open_files_lock);
-  file_close (open_file->file);
-  list_remove (&open_file->elem);
-  lock_release (&open_files_lock);
-  free (open_file->file_name);
-  free (open_file);
+  if (open_file != NULL)
+  {
+    lock_acquire (&open_files_lock);
+    file_close (open_file->file);
+    list_remove (&open_file->elem);
+    lock_release (&open_files_lock);
+    free (open_file->file_name);
+    free (open_file);
+  }
 }
