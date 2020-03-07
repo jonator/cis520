@@ -135,19 +135,33 @@ B2:
 
 ---- ALGORITHMS ----
 
->> B3: Describe your code for reading and writing user data from the
->> kernel.
-
 B3:
+	Each pointer that reads user data must not be null, must be
+	a user address, and must point to a valid page or pages.
+	Then, once a user pointer is dereferenced, it may still
+	trigger page fault and exit accordingly.
 
->> B4: Suppose a system call causes a full page (4,096 bytes) of data
->> to be copied from user space into the kernel.  What is the least
->> and the greatest possible number of inspections of the page table
->> (e.g. calls to pagedir_get_page()) that might result?  What about
->> for a system call that only copies 2 bytes of data?  Is there room
->> for improvement in these numbers, and how much?
+	For files, a user program must pass a valid file descriptor (fd).
+	If fd is 0, a user program is only allowed to read from standard
+	input. If fd is 1, a user program is only allowed to write to
+	standard output. If fd greater than 1, the user must read or
+	write to an exiting file associated with that fd. Any invalid
+	operation will return 0, indicating that no bytes were read or
+	written.
 
 B4:
+	The least number of calls to pagedir_get_page() is 1 because
+	there is always at least one page to be accessed and written to.
+	And if the page is new and there is no offset, it will fill the 
+	page entirely with user data because the page is exactly 4,096
+	bytes. However, if offset is greater than 0, there will be two
+	calls to pagedir_get_page() because it will need to overflow
+	onto a new page.
+
+	A possible solution is to always find a unallocated page to write
+	to in the case of 4,096 user bytes. If there are only 2 bytes to
+	write, it could be put directly into the original page at the 
+	specified offset.
 
 B5:
 	The system call "wait" returns result of process_wait() in process.c
@@ -168,33 +182,32 @@ B5:
 	Then remove both the parent_child relationship record and
 	child exit record before returning the child's exit status.
 
->> B6: Any access to user program memory at a user-specified address
->> can fail due to a bad pointer value.  Such accesses must cause the
->> process to be terminated.  System calls are fraught with such
->> accesses, e.g. a "write" system call requires reading the system
->> call number from the user stack, then each of the call's three
->> arguments, then an arbitrary amount of user memory, and any of
->> these can fail at any point.  This poses a design and
->> error-handling problem: how do you best avoid obscuring the primary
->> function of code in a morass of error-handling?  Furthermore, when
->> an error is detected, how do you ensure that all temporarily
->> allocated resources (locks, buffers, etc.) are freed?  In a few
->> paragraphs, describe the strategy or strategies you adopted for
->> managing these issues.  Give an example.
-
 B6:
+	We handle any invalid user memory access by allowing a page fault
+	interrupt handler to proceed. We check to see if it is a user caused
+	exception, and if it is we call exit(-1) to free all resources
+	related to the failed user program. The function exit() then stores a record
+	of its failure on a global data structure that the parent process
+	can reference while attempting to wait on the child.
+
+	For example, if a parent process calls exec() to successfully start a new
+	child process that later fails due to a page fault, the child process
+	will deallocate and add an exit record to a global list from the
+	page_fault() interrupt handler. The parent process is then able to discover
+	that the child process had failed by finding an exit record in the global
+	exit list.
 
 ---- SYNCHRONIZATION ----
 
->> B7: The "exec" system call returns -1 if loading the new executable
->> fails, so it cannot return before the new executable has completed
->> loading.  How does your code ensure this?  How is the load
->> success/failure status passed back to the thread that calls "exec"?
-
 B7:
-	///////////////////////
-	THIS MAY NOT BE CORRECT:
-	/////////////////////// 
+	When exec() gets called the parent thread passes the child thread a pointer 
+	to a parent_child structure that stores the childs pid. The parent then
+	blockes itself. The child will try to load and if it succeeds will set the 
+	parent_child structure's pid value to its pid value. If it fails it sets the 
+	structure's value to -1. The child then unblocks the parent. When the parent 
+	wakes up, the pid in the parent_child structure will be set to the proper value 
+	for the parent to return.
+
 	We ensure this by using thread_create to generate the -1 error
 	code. With this implementation, an error return value from
 	thread_create would indicate a failure to start a separate thread
@@ -245,10 +258,15 @@ B8:
 
 ---- RATIONALE ----
 
->> B9: Why did you choose to implement access to user memory from the
->> kernel in the way that you did?
-
 B9:
+	We validate memory accessed from user programs by checking
+	if the pointer is null, is a user pointer, and
+	if it accesses a valid page. We do this before dereferencing
+	the pointer. If it is still accessing invalid memory,
+	a page fault will be triggered and if it is caused by a
+	user program, the syscall exit() is then called.
+	This ensures a closing user program maintains
+	proper state in our exit_records and process_children lists.
 
 B10:
 	An advantage of our design for file descriptors is that each
@@ -285,6 +303,10 @@ It is especially effective if outside solutions are not referenced.
 
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design?
+
+We learned a lot about how user programs call system functions and how 
+user data is validated by the OS. We also learned a lot about how
+pages are used to store user and kernel memory.
 
 >> Is there some particular fact or hint we should give students in
 >> future quarters to help them solve the problems?  Conversely, did you
