@@ -13,6 +13,7 @@
         "sstream": "c",
         "*.def": "c",
         "lib.h": "c",
-        "syn-read.h": "c"
+        "syn-read.h": "c",
+        "main.h": "c"
     }
 }

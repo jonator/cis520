@@ -385,12 +385,10 @@ remove_child_records (pid_t child_pid)
       struct process_parent_child *cur = list_entry (e, struct process_parent_child, elem);
       if (cur->child_pid == child_pid)
       {
-        if (try_remove_exit_records (cur->child_pid))
-        {
-          list_remove (&cur->elem);
-          free (cur);
-          break;
-        }
+        try_remove_exit_records (cur->child_pid);
+        list_remove (&cur->elem);
+        free (cur);
+        break;
       }
     }
   }
@@ -431,29 +429,24 @@ void
 exit_as_child (pid_t child, int status)
 {
   struct process_parent_child *ppc;
-  if (try_get_process_parent_child (child, &ppc))
+  try_get_process_parent_child (child, &ppc);
+
+  ASSERT (ppc != NULL);
+
+  if (ppc->is_parent_alive)
   {
-    if (ppc->is_parent_alive)
+    create_push_exit_records ((pid_t) child, status);
+    if (ppc->is_blocking_parent)
     {
-      create_push_exit_records ((pid_t) child, status);
-      if (ppc->is_blocking_parent)
-      {
-        thread_unblock (ppc->parent);
-      }
-    }
-    else
-    {
-      lock_acquire (&process_children_lock);
-      list_remove (&ppc->elem);
-      lock_release (&process_children_lock);
-      free (ppc);
+      thread_unblock (ppc->parent);
     }
   }
   else
   {
-    // parent hasn't returned from thread_create
-    // child exited
-    create_push_exit_records (child, status);
+    lock_acquire (&process_children_lock);
+    list_remove (&ppc->elem);
+    lock_release (&process_children_lock);
+    free (ppc);
   }
 }
 
@@ -484,7 +477,11 @@ struct process_parent_child
 pid_t
 exec (const char *cmd_line)
 {
-  return process_execute (cmd_line);
+  pid_t pid = process_execute (cmd_line);
+  // child failed to load; remove parent-child
+  if (pid == -1)
+    //remove ppc
+  return pid;
 }
 
 
