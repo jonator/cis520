@@ -1,3 +1,4 @@
+
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
@@ -96,11 +97,15 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct list open_files;             /* List of open files and fd's. */
+    int next_fd;                        /* Stores next fd to id open file */
+
 #endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
+
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -115,6 +120,11 @@ void thread_print_stats (void);
 
 typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
+
+#if USERPROG
+/* Get a thread from it's tid */
+struct thread *get_thread (tid_t);
+#endif
 
 void thread_block (void);
 void thread_unblock (struct thread *);

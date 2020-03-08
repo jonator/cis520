@@ -1,0 +1,20 @@
+{
+    "C_Cpp.formatting": "Disabled",
+    "liveshare.allowGuestDebugControl": true,
+    "files.associations": {
+        "complex": "c",
+        "sched.h": "c",
+        "malloc.h": "c",
+        "intr-stubs.h": "c",
+        "*.inc": "c",
+        "atomic": "c",
+        "*.tcc": "c",
+        "fstream": "c",
+        "sstream": "c",
+        "*.def": "c",
+        "lib.h": "c",
+        "syn-read.h": "c",
+        "main.h": "c",
+        "string_view": "c"
+    }
+}

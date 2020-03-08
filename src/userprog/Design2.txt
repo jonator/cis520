@@ -1,0 +1,318 @@
+		           +--------------------------+
+				   |         CIS 520          |
+		           | PROJECT 2: USER PROGRAMS |
+		           |     DESIGN DOCUMENT      |
+		           +--------------------------+
+
+---- GROUP ----
+
+Jon Ator
+Brandon Fisher
+Miles McLenon
+
+			   ARGUMENT PASSING
+			   ================
+
+---- DATA STRUCTURES ----
+
+A1:
+	No data structures were added for argument passing.  arguments
+	were temporarily placed on the heap before copying into userprogs
+	stack.
+
+---- ALGORITHMS ----
+
+A2:
+	Argument passing was implemented within the load function called
+	shortly after the beginning of a new user process.  First, a helper
+	function tokenizes the arguments passed to the program.  This function
+	counts the number of arguments by looking at the number of single and
+	multi space sections of the string.  Then it allocates space on the 
+	heap for char * and char ** that temporarily store all of the arguments.
+	The load function then continues and near its end, an additional 
+	helper function copies the arguments over from the heap into the new
+	userprogs stack in the appropriate order.  
+	
+	To ensure correct order on the stack, the arguments are placed on the heap 
+	in the order they are received, and then iterated in reverse order to be 
+	placed on te userprogs stack.  To avoid overflowing the stack above user 
+	memory and into kernel memory, we decrement esp by the necessary size prior 
+	to copying memory onto the stack.  If there are so many arguments that
+	overflow occurs beyond the stack space and into bss, the kernel handles
+	stack overflow.
+
+---- RATIONALE ----
+
+A3:
+	To follow C programming convention, the '_r' extention to 'strtok'
+	indicates that it is a reentrant function. This implementation of
+	'strtok' in is necessary in Pintos due to the possibility of an
+	interrupt occuring. The reentrant version of 'strtok' requires the
+	caller to include a 2-d pointer to keep track of the current
+	location in the source string as strtok() is repeatedly called.
+	A reentrant implementation of 'strtok' stores iteration state on
+	each thread instead of the kernel, thus allowing for safe thread
+	scheduling and system interrupts.
+
+A4:
+	Advantage 1:
+		If the shell is able to do the command separation, then it could
+		parse a command as an expression. This allows the user of a UNIX
+		shell to generate command arguments from the output of other commands.
+
+	Advantage 2:
+		In addition, a shell could use strings from configuration files
+		or environment variables instead of the command line exclusively.
+		This could save a UNIX shell user excess typing (alias commands)
+		among other conveniences.
+
+			     SYSTEM CALLS
+			     ============
+
+---- DATA STRUCTURES ----
+
+B1:
+	In Syscall.h
+		/*	A struct to keep track of the exit status for a child 
+			process that has exited that may have a living parent
+			waiting on it.
+		*/
+		struct process_exit_record
+		{
+			pid_t child_pid;			/* Child pid */
+			int exit_status;			/* exit_status */
+			struct list_elem elem;		/* Stored in a static list*/
+		};
+
+		/*	A struct to track the parent - child relationship
+			between processes.
+		*/
+		struct process_parent_child
+		{
+			struct thread *parent;		/* Parent thread */
+			pid_t child_pid;			/* Child pid */
+			bool is_blocking_parent;	/* True if parent is blocked, waiting on this child */
+			bool is_parent_alive;		/* False if parent exits before child */
+			struct list_elem elem;		/* Stored in a static list */
+		};
+
+	In Syscall.c
+		/* Struct to track open files including the file
+		   pointer, fd, and file_name. A list of these structs is 
+		   kept on the thread struct.
+		*/
+		struct open_file 
+		{
+			int fd;
+			struct file *file;
+			char *file_name;
+			struct list_elem elem;		/*Stored in a list per thread */
+		};
+
+		static struct list process_exit_records;		/* A static list of all struct process_exit_records */
+		static struct lock process_exit_records_lock;	/* A lock to protect that static list */
+
+		static struct list process_children;			/* A static list of all struct process_children */
+		static struct lock process_children_lock;		/* A lock to protect that static list */
+
+		static struct lock open_files_lock;				/* A lock to protect filesys operations and the thread open_files list */
+
+	In Thread.h
+		struct thread {
+			...
+			struct list open_files;             /* List of open files and fd's. */
+			int next_fd;                        /* Stores next fd to id open file */
+			...
+		}
+
+B2:
+	File descriptors are unique within a single process.  0 and 1 are
+	reserved for I/O so each process is initialized with a variable
+	tracking the next available fd that can be used within a file open
+	operation for that process. If two threads concurrently start and
+	open their first file, each will assign an fd of 2, though the open
+	files are different.
+
+---- ALGORITHMS ----
+
+B3:
+	Each pointer that reads user data must not be null, must be
+	a user address, and must point to a valid page or pages.
+	Then, once a user pointer is dereferenced, it may still
+	trigger page fault and exit accordingly.
+
+	For files, a user program must pass a valid file descriptor (fd).
+	If fd is 0, a user program is only allowed to read from standard
+	input. If fd is 1, a user program is only allowed to write to
+	standard output. If fd greater than 1, the user must read or
+	write to an exiting file associated with that fd. Any invalid
+	operation will return 0, indicating that no bytes were read or
+	written.
+
+B4:
+	The least number of calls to pagedir_get_page() is 1 because
+	there is always at least one page to be accessed and written to.
+	And if the page is new and there is no offset, it will fill the 
+	page entirely with user data because the page is exactly 4,096
+	bytes. However, if offset is greater than 0, there will be two
+	calls to pagedir_get_page() because it will need to overflow
+	onto a new page.
+
+	A possible solution is to always find a unallocated page to write
+	to in the case of 4,096 user bytes. If there are only 2 bytes to
+	write, it could be put directly into the original page at the 
+	specified offset.
+
+B5:
+	The system call "wait" returns result of process_wait() in process.c
+	Handling wait functionality and the interaction with termination 
+	inside of process_wait allows for consistent behavior whether the 
+	waiting thread is a user program or the kernel 'main' thread.
+
+	Inside process_wait(), we first check for an existing struct
+	process_parent_child.  This is the official record of relationship
+	between parent and child.  If it can't be found, return -1.  Assuming
+	it is found, we check for a process_exit_record from the child
+	process.  If the child hasn't exited yet, we adjust a flag, telling
+	the child that it should awaken the parent on exiting and block the 
+	parent thread.
+
+	When the parent returns from the thread_block, the child will 
+	have exited so we get the appropriate process_exit_record.
+	Then remove both the parent_child relationship record and
+	child exit record before returning the child's exit status.
+
+B6:
+	We handle any invalid user memory access by allowing a page fault
+	interrupt handler to proceed. We check to see if it is a user caused
+	exception, and if it is we call exit(-1) to free all resources
+	related to the failed user program. The function exit() then stores a record
+	of its failure on a global data structure that the parent process
+	can reference while attempting to wait on the child.
+
+	For example, if a parent process calls exec() to successfully start a new
+	child process that later fails due to a page fault, the child process
+	will deallocate and add an exit record to a global list from the
+	page_fault() interrupt handler. The parent process is then able to discover
+	that the child process had failed by finding an exit record in the global
+	exit list.
+
+---- SYNCHRONIZATION ----
+
+B7:
+	When exec() gets called the parent thread passes the child thread a pointer 
+	to a parent_child structure that stores the childs pid. The parent then
+	blockes itself. The child will try to load and if it succeeds will set the 
+	parent_child structure's pid value to its pid value. If it fails it sets the 
+	structure's value to -1. The child then unblocks the parent. When the parent 
+	wakes up, the pid in the parent_child structure will be set to the proper value 
+	for the parent to return.
+
+	We ensure this by using thread_create to generate the -1 error
+	code. With this implementation, an error return value from
+	thread_create would indicate a failure to start a separate thread
+	thus ensuring atomicity of failure in an invalid environment.
+
+B8:
+	To ensure proper synchronization between P wait and C exit calls
+	we setup structs to track the process_parent_child (PPC) relationships 
+	and the process_exit_record (PER) of child process.  We also have flags 
+	within the process_parent_child that allow the child to track whether
+	the parent is still alive and whether it is currently blocked
+	waiting on the child.
+
+	Case: P calls wait(C) before C exits
+		Find PPC.  Since C has no PER we set PPC flag that the child is 
+		blocking the parent to true. Block the parent.
+		
+		On C exit:
+			Enter the exit_as_child() function to deal with parents.
+			Find PPC, since parent is still alive add a new exit 
+			record PER and since P is blocked by C, unblock(P)
+
+	Case: P calls wait(C) after C exits
+		Find PPC.  Since C has already exited, find PER.
+		Store the PER exit status for later return and remove
+		the PPC and PER records.
+
+	Case: P exits without waiting, before or after C exits
+		Enter the exit_as_parent() function to deal with all
+		of P's children records.
+		Iterate for any PPC that has P as parent.  For each
+		record found:
+		if C has exited:
+			remove the corresponding PPC and PER records
+		if C has not exited:
+			Set PPC flag that says parent is no longer alive.
+			This gives responsibility for cleaning up the record
+			to the child when it eventually exits.
+
+	The most important special case we ran into was the need 
+	to place our functionality within the process_wait and 
+	process_execute functions so that when the main thread 
+	launches a user program, our structures are initialized
+	just as the would be if a user program made a system call
+	to exec.  This allows the main thread to process_wait() on
+	the primary user program and exit appropriately.
+
+
+---- RATIONALE ----
+
+B9:
+	We validate memory accessed from user programs by checking
+	if the pointer is null, is a user pointer, and
+	if it accesses a valid page. We do this before dereferencing
+	the pointer. If it is still accessing invalid memory,
+	a page fault will be triggered and if it is caused by a
+	user program, the syscall exit() is then called.
+	This ensures a closing user program maintains
+	proper state in our exit_records and process_children lists.
+
+B10:
+	An advantage of our design for file descriptors is that each
+	thread maintains a list of files and file descriptors that
+	it depends on. This makes working with file descriptors
+	intuitive for Pintos developers, and efficient for the thread
+	accessing them. However a possible disadvantage
+	is in the scenario where multiple processes have the same
+	file opened. Since each thread is unaware of other threads'
+	open files, additional overhead is required to maintain
+	synchronization as files are opened and closed. Locks are
+	held on a file irrespective of another process's lack of
+	dependency on that file.
+
+B11:
+	We maintained the tid_t & pid_t identity mapping. We saw these
+	types as a good way to maintain semantic separation of the identity
+	of a thread and a process.
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+The project took a long time, but it was a very effective learning tool.
+It is especially effective if outside solutions are not referenced.
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+We learned a lot about how user programs call system functions and how 
+user data is validated by the OS. We also learned a lot about how
+pages are used to store user and kernel memory.
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?

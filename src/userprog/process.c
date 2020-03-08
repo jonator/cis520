@@ -8,6 +8,7 @@
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
+#include "userprog/syscall.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -15,11 +16,32 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp);
+struct start_process_context *start_process_context_init (char *file_name, struct process_parent_child *ppc);
+static bool load (char *cmdline, void (**eip) (void), void **esp);
+void load_uprog_args (char **args, int argc, char **esp);
+int count_pargs (char *sig);
+char **tokenize_uprog_signature (char *sig, int *argc);
+void free_uprog_sig_tokens (char **tokens, int argc);
+
+struct start_process_context
+  {
+    char *file_name;
+    struct process_parent_child *ppc;
+  };
+
+struct start_process_context
+*start_process_context_init (char *file_name, struct process_parent_child *ppc)
+{
+  struct start_process_context *new_ctxt = malloc (sizeof (struct start_process_context));
+  new_ctxt->file_name = file_name;
+  new_ctxt->ppc = ppc;
+  return new_ctxt;
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -30,6 +52,7 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
+  struct process_parent_child *ppc;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -38,19 +61,33 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  ppc = thread_current_process_parent_child_create ();
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
-  return tid;
+
+  struct start_process_context *ctxt = start_process_context_init ((char*) fn_copy, ppc);
+
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, ctxt);
+  
+  if (ppc->child_pid != tid && ppc->child_pid != -1)
+  {
+    enum intr_level old_level = intr_disable ();
+    ppc->is_blocking_parent = true;
+    thread_block();
+    intr_set_level (old_level);
+  }
+
+  free (ctxt);
+  palloc_free_page (fn_copy);
+
+  return ppc->child_pid;
 }
 
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *file_name_)
+start_process (void *start_process_context)
 {
-  char *file_name = file_name_;
+  struct start_process_context *ctxt = (struct start_process_context*) start_process_context;
   struct intr_frame if_;
   bool success;
 
@@ -59,13 +96,28 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (ctxt->file_name, &if_.eip, &if_.esp);
 
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
+  if (success)
+  {
+    ctxt->ppc->child_pid = thread_current ()->tid;
+    if (ctxt->ppc->is_blocking_parent)
+    {
+      ctxt->ppc->is_blocking_parent = false;
+      thread_unblock (ctxt->ppc->parent);
+    }
+  }
+  else
+  {
+    ctxt->ppc->child_pid = -1;
+    if (ctxt->ppc->is_blocking_parent)
+    {
+      ctxt->ppc->is_blocking_parent = false;
+      thread_unblock (ctxt->ppc->parent);
+    }
+
     thread_exit ();
-
+  }
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -86,8 +138,25 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
+  struct process_parent_child *ppc;
+  struct process_exit_record *exit_record;
+  if (try_get_process_parent_child (child_tid, &ppc))
+  {
+    if (!has_process_exit_record (child_tid))
+    {
+      ppc->is_blocking_parent = true;
+      enum intr_level old_level = intr_set_level (INTR_OFF);
+      thread_block ();
+      intr_set_level (old_level);
+    }
+    exit_record = pop_process_exit_record (child_tid);
+    int exit_status = exit_record->exit_status;
+    free (exit_record);
+    remove_process_parent_child (child_tid);
+    return exit_status;
+  }
   return -1;
 }
 
@@ -201,12 +270,129 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
+/* Loads user program arguments in stack friendly
+   format at ESP. ARGS sould be of size A[ARGC][]. */
+void
+load_uprog_args (char **args, int argc, char **esp)
+{
+  int i;
+  const int WORD_SIZE = 4;
+  const int NULL_TERM = 1;
+  int running_arg_size = 0;
+  int *arg_stack_ptrs;
+
+  arg_stack_ptrs = malloc (sizeof (int) * argc);
+
+  //loop to push the full arg strings
+  for (i = argc - 1; i >= 0; i--)
+  {
+    int argLen = strlen (args[i]) + NULL_TERM;
+    running_arg_size += argLen;
+    *esp -= argLen;
+    memcpy (*esp, args[i], argLen);
+    // TODO - get the pointers straightened out
+    // we want esp to point to something higher 
+    // on esp, not into our heap
+    //memcpy (args + i, esp, WORD_SIZE);
+    arg_stack_ptrs[i] = *esp;
+  }
+  
+  // word align all args
+  *esp -= WORD_SIZE - running_arg_size % WORD_SIZE;
+
+  *esp -= WORD_SIZE;
+  memset (*esp, 0, WORD_SIZE);
+  //push all the pointers to those args
+  for (i = argc - 1; i >= 0; i--)
+  {
+    *esp -= WORD_SIZE;
+    memcpy (*esp, arg_stack_ptrs + i, WORD_SIZE);
+  }
+
+  //push argv
+  char *argv = malloc (sizeof (char *));
+  memcpy (argv, esp, WORD_SIZE);
+  *esp -= WORD_SIZE;
+  memcpy (*esp, argv, WORD_SIZE);
+  //**esp = (int) *esp + WORD_SIZE;  
+
+  //push argc
+  *esp -= WORD_SIZE;
+  **esp = argc;
+  //push bogus return address
+  *esp -= WORD_SIZE;
+  **esp = 0xFFFF;
+  free (arg_stack_ptrs);
+}
+
+/* Count number of user program arguments
+   in program signature SIG. */
+int
+count_pargs (char *sig)
+{
+  unsigned int argc = 1;
+  for (int i = 0; i < strlen(sig); i++)    
+  {
+    if (sig[i] == ' ')
+    {
+      while (sig[i] == ' ')
+        i++;
+      argc++;
+    }
+  }
+  return argc;
+}
+
+/* Creates uprog arg data structure allocated on heap
+   from user program signature SIG.
+   Array is of size A[ARGC][arg_len].
+   Must be freed at 2 dimensions. */
+char **
+tokenize_uprog_signature (char *sig, int *argc)
+{
+  char **args;
+  char *arg;
+  char *save_ptr;
+  int argc_;
+  char argi;
+
+  // Count the number of arguments
+  argc_ = count_pargs (sig);
+  
+  // Create space to point to each arg
+  args = malloc (sizeof (int) * argc_);
+
+  // Tokenize and copy args
+  argi = 0;
+
+  for (arg = strtok_r (sig, " ", &save_ptr); arg != NULL;
+       arg = strtok_r (NULL, " ", &save_ptr))
+  {
+    int argLen = strlen (arg) + 1;
+    char * currentArg = malloc (sizeof (char) * argLen);
+    strlcpy (currentArg, arg, argLen);
+    args[argi] = currentArg;
+    argi++;
+  }
+
+  *argc = argc_;
+  return args;
+}
+
+/* Frees tokens on heap */
+void free_uprog_sig_tokens (char **tokens, int argc)
+{
+    for (int i = 0; i < argc; i++)
+      free (tokens[i]);
+    free (tokens);
+}
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp) 
+load (char *program_signature, void (**eip) (void), void **esp) 
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -214,7 +400,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
+  char **pargs;
+  int pargc;
 
+  /* Load each arg into heap mem */
+  pargs = tokenize_uprog_signature (program_signature, &pargc);
+  
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
@@ -222,12 +413,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  file = filesys_open (pargs[0]);
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
+      printf ("load: %s: open failed\n", pargs[0]);
       goto done; 
     }
+
+  file_deny_write (file);
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -238,7 +431,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      printf ("load: %s: error loading executable\n", pargs[0]);
       goto done; 
     }
 
@@ -305,6 +498,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (!setup_stack (esp))
     goto done;
 
+  load_uprog_args (pargs, pargc, (char **) esp);
+  strlcpy (t->name, pargs[0], strlen (pargs[0]) + 1);
+
+  // hex_dump();
+
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
@@ -313,6 +511,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
  done:
   /* We arrive here whether the load is successful or not. */
   file_close (file);
+  free_uprog_sig_tokens (pargs, pargc);
   return success;
 }
 
@@ -427,7 +626,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp) // pass prog args
 {
   uint8_t *kpage;
   bool success = false;
