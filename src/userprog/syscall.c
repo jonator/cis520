@@ -36,7 +36,9 @@ static struct lock process_exit_records_lock;
 static struct list process_children;
 static struct lock process_children_lock;
 
-bool is_valid_user_pointer (void *);
+bool is_valid_user_param (void *);
+void *get_param_pointer (int, struct intr_frame*);
+
 static void syscall_handler (struct intr_frame *);
 void halt (void);
 void exit_as_child (pid_t child, int status);
@@ -140,7 +142,7 @@ struct open_file
 }
 
 bool
-is_valid_user_pointer (void *vaddr)
+is_valid_user_param (void *vaddr)
 {
   return vaddr != NULL 
         && is_user_vaddr (vaddr)
@@ -148,9 +150,23 @@ is_valid_user_pointer (void *vaddr)
 }
 
 void
+*get_param_pointer (int height, struct intr_frame *f)
+{
+  if (!is_valid_user_param (f->esp + height * 4)
+      || !is_valid_user_param (f->esp + height * 4 + 3)
+      || *(int*)(f->esp + height * 4) == NULL
+      || !is_valid_user_param ((void*)(*(int*)(f->esp + height * 4))))
+  {
+    exit (-1);
+  }
+  return f->esp + sizeof (int) * height;
+}
+
+void
 *get_param (int height, struct intr_frame *f)
 {
-  if (!is_valid_user_pointer (f->esp + height * 4) || !is_valid_user_pointer (f->esp + height * 4 + 3))
+  if (!is_valid_user_param (f->esp + height * 4)
+      || !is_valid_user_param (f->esp + height * 4 + 3))
   {
     exit (-1);
   }
@@ -193,8 +209,8 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_EXEC:
       cmd_line = (char*) *((int*) get_param (1, f));
-      if (is_valid_user_pointer (cmd_line) 
-          && is_valid_user_pointer (cmd_line + strlen (cmd_line)))
+      if (is_valid_user_param (cmd_line) 
+          && is_valid_user_param (cmd_line + strlen (cmd_line)))
       {
         return_value = exec (cmd_line);
       }
@@ -204,19 +220,17 @@ syscall_handler (struct intr_frame *f)
       return_value = wait (pid);
       break;
     case SYS_CREATE:
-      file = (char*) *((int*) get_param (1, f));
+      file = (char*) *((int*) get_param_pointer (1, f));
       initial_size = *((int*) get_param (2, f));
       return_value = (int) create (file, initial_size);
       break;
     case SYS_REMOVE:
-      file = (char*) *((int*) get_param (1, f));
-      if (is_valid_user_pointer (file))
-        return_value = (int) remove (file);
+      file = (char*) *((int*) get_param_pointer (1, f));
+      return_value = (int) remove (file);
       break;
     case SYS_OPEN:
-      file = (char*) *((int*) get_param (1, f));
-      if (is_valid_user_pointer (file))
-        return_value = open (file);
+      file = (char*) *((int*) get_param_pointer (1, f));
+      return_value = open (file);
       break;
     case SYS_FILESIZE:
       fd = *((int*) get_param (1, f));
@@ -224,17 +238,15 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_READ:
       fd = *((int*) get_param (1, f));
-      buffer = (void*) *((int*) get_param (2, f));
+      buffer = (void*) *((int*) get_param_pointer (2, f));
       size = *((int*) get_param (3, f));
-      if (is_valid_user_pointer (buffer))
-        return_value = read (fd, buffer, size);
+      return_value = read (fd, buffer, size);
       break;
     case SYS_WRITE:
       fd = *((int*) get_param (1, f));
-      buffer = (void*) *((int*) get_param (2, f));
+      buffer = (void*) *((int*) get_param_pointer (2, f));
       size = *((int*) get_param (3, f));
-      if (is_valid_user_pointer (buffer))
-        return_value = write (fd, buffer, size);
+      return_value = write (fd, buffer, size);
       break;
     case SYS_SEEK:
       fd = *((int*) get_param (1, f));
@@ -375,6 +387,7 @@ has_process_exit_record (pid_t pid)
 void
 remove_child_records (pid_t child_pid)
 {
+  tid_t parent_tid = thread_current ()->tid;
   lock_acquire (&process_children_lock);
   if (!list_empty (&process_children))
   {
@@ -383,7 +396,7 @@ remove_child_records (pid_t child_pid)
         e = list_next (e))
     {
       struct process_parent_child *cur = list_entry (e, struct process_parent_child, elem);
-      if (cur->child_pid == child_pid)
+      if (cur->child_pid == child_pid && cur->parent->tid == parent_tid)
       {
         try_remove_exit_records (cur->child_pid);
         list_remove (&cur->elem);
