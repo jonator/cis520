@@ -73,7 +73,6 @@ process_execute (const char *file_name)
     enum intr_level old_level = intr_disable ();
     ppc->is_blocking_parent = true;
     thread_block();
-    ppc->is_blocking_parent = false;
     intr_set_level (old_level);
   }
 
@@ -92,9 +91,6 @@ start_process (void *start_process_context)
   struct intr_frame if_;
   bool success;
 
-  // // make sure parent proceeds to block
-  // thread_yield ();
-
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -105,28 +101,23 @@ start_process (void *start_process_context)
   if (success)
   {
     ctxt->ppc->child_pid = thread_current ()->tid;
-    if (ctxt->ppc->is_blocking_parent && ctxt->ppc->parent == THREAD_BLOCKED)
+    if (ctxt->ppc->is_blocking_parent)
+    {
+      ctxt->ppc->is_blocking_parent = false;
       thread_unblock (ctxt->ppc->parent);
-
-    // thread_yield ();
-    //let the parent wake up, see that we successfully loaded, then both 
-    // parent and child can continue
+    }
   }
   else
   {
     ctxt->ppc->child_pid = -1;
-    if (ctxt->ppc->is_blocking_parent && ctxt->ppc->parent == THREAD_BLOCKED)
+    if (ctxt->ppc->is_blocking_parent)
+    {
+      ctxt->ppc->is_blocking_parent = false;
       thread_unblock (ctxt->ppc->parent);
+    }
 
     thread_exit ();
   }
-  
-    //I think we should call exit (-1) here
-    //We also need to have some synchronization
-    //so the calling thread won't return from process_execute
-    //until we've determined success in this spot
-
-
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -150,6 +141,7 @@ int
 process_wait (tid_t child_tid) 
 {
   struct process_parent_child *ppc;
+  struct process_exit_record *exit_record;
   if (try_get_process_parent_child (child_tid, &ppc))
   {
     if (!has_process_exit_record (child_tid))
@@ -159,8 +151,10 @@ process_wait (tid_t child_tid)
       thread_block ();
       intr_set_level (old_level);
     }
-    int exit_status = get_process_exit_record (child_tid)->exit_status;
-    remove_child_records (child_tid);
+    exit_record = pop_process_exit_record (child_tid);
+    int exit_status = exit_record->exit_status;
+    free (exit_record);
+    remove_process_parent_child (child_tid);
     return exit_status;
   }
   return -1;
@@ -425,6 +419,8 @@ load (char *program_signature, void (**eip) (void), void **esp)
       printf ("load: %s: open failed\n", pargs[0]);
       goto done; 
     }
+
+  file_deny_write (file);
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr

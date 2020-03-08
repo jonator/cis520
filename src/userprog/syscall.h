@@ -24,9 +24,9 @@ struct process_parent_child
 void syscall_init (void);
 struct process_parent_child *thread_current_process_parent_child_create (void);
 bool try_get_process_parent_child (pid_t pid, struct process_parent_child **ppc);
-struct process_exit_record *get_process_exit_record (pid_t child_pid);
+struct process_exit_record *pop_process_exit_record (pid_t child_pid);
 bool has_process_exit_record (pid_t pid);
-void remove_child_records (pid_t child_pid);
+void remove_process_parent_child (pid_t child_pid);
 void exit(int status);
 
 #endif /* userprog/syscall.h */

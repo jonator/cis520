@@ -85,6 +85,7 @@ struct open_file
   int len = strlen (file_name);
   new_open_file->file_name = malloc (sizeof (char) * len + 1);
   memcpy (new_open_file->file_name, file_name, len);
+  new_open_file->file_name[len] = 0;
 
   lock_acquire (&open_files_lock);
   list_push_back (&t->open_files, &new_open_file->elem);
@@ -301,7 +302,7 @@ try_get_process_parent_child (pid_t child_pid
 }
 
 struct process_exit_record
-*get_process_exit_record (pid_t child_pid)
+*pop_process_exit_record (pid_t child_pid)
 {
   struct process_exit_record *found_per = NULL;
   lock_acquire (&process_exit_records_lock);
@@ -315,6 +316,7 @@ struct process_exit_record
       if (cur->child_pid == child_pid)
       {
         found_per = cur;
+        list_remove (&cur->elem);
         break;
       }
     }
@@ -385,7 +387,7 @@ has_process_exit_record (pid_t pid)
 }
 
 void
-remove_child_records (pid_t child_pid)
+remove_process_parent_child (pid_t child_pid)
 {
   tid_t parent_tid = thread_current ()->tid;
   lock_acquire (&process_children_lock);
@@ -398,7 +400,6 @@ remove_child_records (pid_t child_pid)
       struct process_parent_child *cur = list_entry (e, struct process_parent_child, elem);
       if (cur->child_pid == child_pid && cur->parent->tid == parent_tid)
       {
-        try_remove_exit_records (cur->child_pid);
         list_remove (&cur->elem);
         free (cur);
         break;
@@ -493,7 +494,8 @@ exec (const char *cmd_line)
   pid_t pid = process_execute (cmd_line);
   // child failed to load; remove parent-child
   if (pid == -1)
-    //remove ppc
+    remove_process_parent_child (pid);
+
   return pid;
 }
 
