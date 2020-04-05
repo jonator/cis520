@@ -15,6 +15,9 @@
         "lib.h": "c",
         "syn-read.h": "c",
         "main.h": "c",
-        "string_view": "c"
+        "string_view": "c",
+        "cstdlib": "c",
+        "memory": "c",
+        "new": "c"
     }
 }

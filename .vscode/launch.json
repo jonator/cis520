@@ -11,7 +11,7 @@
             "program": "kernel.o",
             "targetArchitecture": "x86",
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/src/userprog/build",
+            "cwd": "${workspaceFolder}/src/vm/build",
             "launchCompleteCommand": "None",
             "environment": [],
             "externalConsole": false,

@@ -8,7 +8,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 
-static struct frame *frames;
+static struct frame *frames;    /*frame table*/
 static size_t frame_cnt;
 
 static struct lock scan_lock;

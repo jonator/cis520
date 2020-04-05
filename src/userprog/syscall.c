@@ -15,6 +15,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "vm/page.h"
+#include "vm/frame.h"
  
  
 static int sys_halt (void);
@@ -504,7 +505,18 @@ lookup_mapping (int handle)
 static void
 unmap (struct mapping *m) 
 {
-/* add code here */
+  struct page *p;
+  unsigned int i;
+/* add code here DONE */
+  for (i = 0; i < m->page_cnt; i++)
+  {
+    p = page_for_addr (m->base + i * PGSIZE);
+    lock_acquire (&p->frame->lock);
+    page_out (p);
+    lock_release (&p->frame->lock);
+  }
+  list_remove (&m->elem);
+  free (m);
 }
  
 /* Mmap system call. */
@@ -560,8 +572,10 @@ sys_mmap (int handle, void *addr)
 static int
 sys_munmap (int mapping) 
 {
-/* add code here */
-
+/* add code here DONE*/
+  struct mapping *m;
+  m = lookup_mapping (mapping);
+  unmap(m);
   return 0;
 }
  

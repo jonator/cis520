@@ -44,6 +44,8 @@ bool page_accessed_recently (struct page *);
 bool page_lock (const void *, bool will_write);
 void page_unlock (const void *);
 
+struct page *page_for_addr (const void *address);
+
 hash_hash_func page_hash;
 hash_less_func page_less;
 
