@@ -505,16 +505,15 @@ lookup_mapping (int handle)
 static void
 unmap (struct mapping *m) 
 {
-  struct page *p;
   unsigned int i;
 /* add code here DONE */
   for (i = 0; i < m->page_cnt; i++)
   {
-    p = page_for_addr (m->base + i * PGSIZE);
-    lock_acquire (&p->frame->lock);
-    page_out (p);
-    lock_release (&p->frame->lock);
+    page_deallocate (m->base + i * PGSIZE);
   }
+  lock_acquire (&fs_lock);
+  file_close (m->file);
+  lock_release (&fs_lock);
   list_remove (&m->elem);
   free (m);
 }
