@@ -34,13 +34,52 @@ page_exit (void)
     hash_destroy (h, destroy_page);
 }
 
+bool
+is_address_below_esp (void *address, void *esp)
+{
+  return address < esp;
+}
+
+/* Handles the case when PUSHA is called
+   before ESP is moved.
+ */
+bool
+is_pusha_signal (void *address, void *esp)
+{
+  return address >= esp - 32;
+}
+
+bool
+is_below_stack_limit (void *address)
+{
+  return (PHYS_BASE - address) / PGSIZE < 20;
+}
+
+/* Adds page for stack into hash table */
+struct page *
+add_user_stack_page (void *page_address)
+{
+  struct page *stack_page = page_allocate (page_address, false);
+  if (stack_page != NULL)
+  {
+    stack_page->frame = frame_alloc_and_lock (stack_page);
+    if (stack_page->frame != NULL)
+    {
+      stack_page->read_only = false;
+      stack_page->private = false;
+      frame_unlock (stack_page->frame);
+      return stack_page;
+    }
+  }
+}
+
 /* Returns the page containing the given virtual ADDRESS,
    or a null pointer if no such page exists.
    Allocates stack pages as necessary. */
 struct page *
 page_for_addr (const void *address) 
 {
-  if (address < PHYS_BASE) 
+  if (address < PHYS_BASE) // is user page
     {
       struct page p;
       struct hash_elem *e;
@@ -57,21 +96,23 @@ page_for_addr (const void *address)
       // thread_current()->stack //saved stack pointer
       // check if stack access HEAP_BASE/STACK_LIMIT? < address < PHYS_BASE
       void *cur_esp = thread_current()->user_esp;
-      if (address < cur_esp && address >= cur_esp - 32 && (PHYS_BASE - address) / PGSIZE < 4)
+      if (is_address_below_esp (address, cur_esp)
+        && is_pusha_signal (address, cur_esp)
+        && is_below_stack_limit (address))
       {
-        // alloc and add to hash table
-        stack_page = page_allocate (p.addr, false);
-        if (stack_page != NULL)
+        struct page *last_page;
+        void *cur_page_addr = PHYS_BASE - 1;
+        while (cur_page_addr >= address)
         {
-          stack_page->frame = frame_alloc_and_lock (stack_page);
-          if (stack_page->frame != NULL)
+          p.addr = (void *) pg_round_down (cur_page_addr);
+          e = hash_find (thread_current ()->pages, &p.hash_elem);
+          if (e == NULL)
           {
-            stack_page->read_only = false;
-            stack_page->private = false;
-            frame_unlock (stack_page->frame);
-            return stack_page;
-          }
+             last_page = add_user_stack_page (p.addr);
+          }          
+          cur_page_addr -= PGSIZE;
         }
+        return last_page;
       }
     }
   return NULL;
@@ -170,23 +211,19 @@ page_out (struct page *p)
 
   dirty = pagedir_is_dirty (p->thread->pagedir, (void *) p->addr);
   if (!dirty)
-    ok = true;
+    ok = swap_out (p);
   else
   {
+    if (p->private)
+      return swap_out (p);
     // validate assoc file
     if (p->file == NULL)
       ok = false;
     else
     {
-      // handle swap
-      if (p->private)
-        ok = swap_out (p);
-      else
-      {
-        ok = file_write_at (p->file, (const void *) p->frame->base,
-                            p->file_bytes,
-                            p->file_offset);
-      }
+      ok = file_write_at (p->file, (const void *) p->frame->base,
+                          p->file_bytes,
+                          p->file_offset);
     }
   }
 
