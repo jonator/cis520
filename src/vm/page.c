@@ -52,7 +52,7 @@ is_pusha_signal (void *address, void *esp)
 bool
 is_below_stack_limit (void *address)
 {
-  return (PHYS_BASE - address) / PGSIZE < 20;
+  return (PHYS_BASE - address) <= STACK_MAX;
 }
 
 /* Adds page for stack into hash table */
@@ -67,7 +67,6 @@ add_user_stack_page (void *page_address)
     {
       stack_page->read_only = false;
       stack_page->private = false;
-      frame_unlock (stack_page->frame);
       return stack_page;
     }
   }
@@ -96,7 +95,7 @@ page_for_addr (const void *address)
       void *cur_esp = thread_current()->user_esp;
       if (is_address_below_esp (address, cur_esp)
         && is_pusha_signal (address, cur_esp)
-        && is_below_stack_limit (address))
+        && is_below_stack_limit (p.addr))
       {
         struct page *last_page;
         void *cur_page_addr = PHYS_BASE - 1;
@@ -109,9 +108,10 @@ page_for_addr (const void *address)
              last_page = add_user_stack_page (p.addr);
              if (cur_page_addr - PGSIZE >= address)
              {
-                 pagedir_set_page (thread_current ()->pagedir, last_page->addr,
+                pagedir_set_page (thread_current ()->pagedir, last_page->addr,
                               last_page->frame->base, !last_page->read_only);
              }
+             frame_unlock (last_page->frame);
           }          
           cur_page_addr -= PGSIZE;
         }
