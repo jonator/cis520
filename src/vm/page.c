@@ -93,8 +93,6 @@ page_for_addr (const void *address)
 
       /* No page.  Expand stack? */
       /* add code */
-      // thread_current()->stack //saved stack pointer
-      // check if stack access HEAP_BASE/STACK_LIMIT? < address < PHYS_BASE
       void *cur_esp = thread_current()->user_esp;
       if (is_address_below_esp (address, cur_esp)
         && is_pusha_signal (address, cur_esp)
@@ -109,6 +107,11 @@ page_for_addr (const void *address)
           if (e == NULL)
           {
              last_page = add_user_stack_page (p.addr);
+             if (cur_page_addr - PGSIZE >= address)
+             {
+                 pagedir_set_page (thread_current ()->pagedir, last_page->addr,
+                              last_page->frame->base, !last_page->read_only);
+             }
           }          
           cur_page_addr -= PGSIZE;
         }
@@ -215,9 +218,9 @@ page_out (struct page *p)
   else
   {
     if (p->private)
-      return swap_out (p);
+      ok = swap_out (p);
     // validate assoc file
-    if (p->file == NULL)
+    else if (p->file == NULL)
       ok = false;
     else
     {
