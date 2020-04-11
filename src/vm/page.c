@@ -65,11 +65,10 @@ add_user_stack_page (void *page_address)
     stack_page->frame = frame_alloc_and_lock (stack_page);
     if (stack_page->frame != NULL)
     {
-      stack_page->read_only = false;
-      stack_page->private = false;
       return stack_page;
     }
   }
+  return NULL;
 }
 
 /* Returns the page containing the given virtual ADDRESS,
@@ -106,7 +105,7 @@ page_for_addr (const void *address)
           if (e == NULL)
           {
              last_page = add_user_stack_page (p.addr);
-             if (cur_page_addr - PGSIZE >= address)
+             if (last_page != NULL && cur_page_addr - PGSIZE >= address)
              {
                 pagedir_set_page (thread_current ()->pagedir, last_page->addr,
                               last_page->frame->base, !last_page->read_only);
@@ -214,21 +213,25 @@ page_out (struct page *p)
 
   dirty = pagedir_is_dirty (p->thread->pagedir, (void *) p->addr);
   if (!dirty)
-    ok = swap_out (p);
+  {
+    ok = true;
+  }
   else
   {
-    if (p->private)
-      ok = swap_out (p);
-    // validate assoc file
-    else if (p->file == NULL)
-      ok = false;
-    else
+    if (p->file != NULL && !p->private)
     {
       ok = file_write_at (p->file, (const void *) p->frame->base,
                           p->file_bytes,
                           p->file_offset);
     }
+    else
+    {
+      ok = swap_out (p);
+    }
   }
+
+  if (ok)
+    p->frame = NULL;
 
   return ok;
 }
