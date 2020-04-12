@@ -6,72 +6,113 @@
 
 ---- GROUP ----
 
->> Fill in the names of your group members.
-
 Jonathan Ator   jator@ksu.edu
 Miles McLenon   milesmclenon@ksu.edu
 Brandon Fisher  bmfisher@ksu.edu
-
----- PRELIMINARIES ----
-
->> If you have any preliminary comments on your submission, notes for the
->> TAs, or extra credit, please give them here.
-
->> Please cite any offline or online sources you consulted while
->> preparing your submission, other than the Pintos documentation, course
->> text, lecture notes, and course staff.
 
 			PAGE TABLE MANAGEMENT
 			=====================
 
 ---- ALGORITHMS ----
 
->> A1: In a few paragraphs, describe the existing code for locating the
->> frame, if any, that contains the data of a given page.
+A1:
+	On a memory access the page is first looked up in the thread's 
+	page table. If the page already has a frame in physical memory
+	the page struct will contain a pointer to the frame and no 
+	further action is necessary.  If there is no frame, the page_in()
+	function calls do_page_in() which attempts to allocate a frame.
+
+	In the try_frame_alloc_and_lock() function, the kernel looks through
+	all frames in the frame table one at a time.  If at any point it
+	successfully finds a frame that it can obtain the frame lock and 
+	also has no page currently assigned, the frame is chosen and returned.
+
+	The pointers are then matched up (frame->page and page->frame).  To
+	finalize the connection between page and frame, page_in() calls 
+	pagedir_set_page() which maps the user's page->addr to the kernels
+	physical frame->base.
 
 ---- SYNCHRONIZATION ----
 
->> A2: When two user processes both need a new frame at the same time,
->> how are races avoided?
+A2:
+	The function frame_alloc_and_lock() asserts that a lock is held by the calling
+	thread. The calling thread is expected to have called frame_lock()
+	prior to calling the function, and frame_unlock() prior.
 
 		       PAGING TO AND FROM DISK
 		       =======================
 
 ---- ALGORITHMS ----
 
->> B1: When a frame is required but none is free, some frame must be
->> evicted.  Describe the algorithm used to choose a frame to evict.
+B1:
+	First, if all frames are considered occupied by pages, we then find the
+	next frame to evict baed on how recent its page has been
+	accessed, using page_accessed_recently(). If it has been accessed it is
+	set to accessed, and skipped in a 'second chance' algorithm. Finally, if the
+	page hasn't been accessed, page_out() is called on the page, and its frame
+	is returned with the old page evicted.
 
->> B2: Explain your heuristic for deciding whether a page fault for an
->> invalid virtual address should cause the stack to be extended into
->> the page that faulted.
+B2:
+	If there is a page fault the stack will be expaneded based on three conditions.
+	The address is below esp, winthin 4 bytes, and is below the stack limit. When all
+	three contitions are true then the stack will be expanded.
+
+	
 
 			 MEMORY MAPPED FILES
 			 ===================
 
 ---- DATA STRUCTURES ----
 
->> C1: Copy here the declaration of each new or changed `struct' or
->> `struct' member, global or static variable, `typedef', or
->> enumeration.  Identify the purpose of each in 25 words or less.
+C1:
+	Nothing was changed on the struct from the starter code provided.
+	The mapping struct is used to track important information about
+	memory mapped files.
+
+	/* Binds a mapping id to a region of memory and a file. */
+	struct mapping
+	{
+		struct list_elem elem;      /* List element. */
+		int handle;                 /* Mapping id. */
+		struct file *file;          /* File. */
+		uint8_t *base;              /* Start of memory mapping. */
+		size_t page_cnt;            /* Number of pages mapped. */
+	};
 
 ---- ALGORITHMS ----
 
->> C2: Describe how memory mapped files integrate into your virtual
->> memory subsystem.  Explain how the page fault and eviction
->> processes differ between swap pages and other pages.
+C2:
+	Memory mapping a file provides a direct relation between
+	the bytes of a virtual page of memory and the actual file
+	stored on disk.  This allows users to access the file using
+	memory commands, rather than file commands.
 
->> C3: Explain how you determine whether a new file mapping overlaps
->> any existing segment.
+	In a page fault context, swap pages are read in from swap
+	disk sectors rather than from files on disk.  Similarly on 
+	eviction the swap pages are written out using block_write()
+	to go to swap disk rather than to file_write() for the other
+	pages.  Memory mapped files are read/written to actual files
+	and not to swap disk.
+
+C3:
+	The file mapping process attempts to map one page at a time for
+	the length of the file.  Overlapping is discovered in the 
+	page_allocate() function if the hash table that organizes the
+	user process' pages already has an element for that address.
+	In this case, the page and mapping are rolled back and aborted.
 
 ---- RATIONALE ----
 
->> C4: Mappings created with "mmap" have similar semantics to those of
->> data demand-paged from executables, except that "mmap" mappings are
->> written back to their original files, not to swap.  This implies
->> that much of their implementation can be shared.  Explain why your
->> implementation either does or does not share much of the code for
->> the two situations.
+C4:
+	Most of the implementation uses shared code regarding the dallocation
+	of pages, however the actual writing to memory is different.
+
+	MMapped pages that are deallocated are run through page_out() which
+	will the write directly to the file associated with that page using
+	file_write_at().
+
+	However, with swap_out, bytes are written directly to the swap
+	partition via block_write().
 
 			   SURVEY QUESTIONS
 			   ================
@@ -84,15 +125,13 @@ the quarter.
 
 >> In your opinion, was this assignment, or any one of the three problems
 >> in it, too easy or too hard?  Did it take too long or too little time?
-
+	
+	Compared to the previous assignents in this course the overall difficulty 
+	was less. This is only because of the shortened length. The difficulty of
+	the indidvidual compenents was on par with other tasks in this course.
+	
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design?
 
->> Is there some particular fact or hint we should give students in
->> future quarters to help them solve the problems?  Conversely, did you
->> find any of our guidance to be misleading?
-
->> Do you have any suggestions for the TAs to more effectively assist
->> students, either for future quarters or the remaining projects?
-
->> Any other comments?
+	I gained more insight into user program related paging, as well as
+	how page data is associated with physical memory via frames.

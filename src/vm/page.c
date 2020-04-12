@@ -212,22 +212,15 @@ page_out (struct page *p)
   /* Page P will fault from here-> */
 
   dirty = pagedir_is_dirty (p->thread->pagedir, (void *) p->addr);
-  if (!dirty)
+  if (p->file != NULL && !p->private && dirty)
   {
-    ok = swap_out(p);
+    ok = file_write_at (p->file, (const void *) p->frame->base,
+                        p->file_bytes,
+                        p->file_offset);
   }
   else
   {
-    if (p->file != NULL && !p->private)
-    {
-      ok = file_write_at (p->file, (const void *) p->frame->base,
-                          p->file_bytes,
-                          p->file_offset);
-    }
-    else
-    {
-      ok = swap_out (p);
-    }
+    ok = swap_out (p);
   }
 
   if (ok)
