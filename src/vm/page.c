@@ -214,7 +214,7 @@ page_out (struct page *p)
   dirty = pagedir_is_dirty (p->thread->pagedir, (void *) p->addr);
   if (!dirty)
   {
-    ok = true;
+    ok = swap_out(p);
   }
   else
   {
